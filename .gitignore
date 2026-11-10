@@ -218,3 +218,25 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+
+
+
+
+# Dataset - Never upload private/restricted dataset files
+data/raw/
+data/processed/
+
+# Model checkpoints and downloaded weights
+checkpoints/
+
+# Local credentials and secrets
+.env
+.env.*
+!.env.example
+
+# Dataset archives
+*.zip
+*.tar
+*.tar.gz
+*.rar
