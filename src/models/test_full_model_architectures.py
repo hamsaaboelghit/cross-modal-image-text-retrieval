@@ -25,8 +25,10 @@ CONFIGURATIONS = [
     ("RNN", "rnn", False),
     ("LSTM", "lstm", False),
     ("GRU", "gru", False),
+    ("Bidirectional RNN", "rnn", True),
     ("Bidirectional LSTM", "lstm", True),
     ("Bidirectional GRU", "gru", True),
+    ("Transformer", "transformer", False),
 ]
 
 
@@ -91,6 +93,23 @@ def test_architecture(
     assert torch.isfinite(text_embeddings).all()
     assert torch.isfinite(attention_weights).all()
 
+    # Attention must ignore padding tokens
+    flat_captions = captions.reshape(
+        -1,
+        captions.size(2)
+    )
+
+    padding_mask = flat_captions == 0
+
+    flat_attention = attention_weights.reshape(
+        -1,
+        captions.size(2)
+    )
+
+    assert torch.all(
+        flat_attention[padding_mask] == 0
+    ), "Attention assigned non-zero weights to padding tokens"
+
     # Backward pass
     similarities = (
         image_embeddings.unsqueeze(1) * text_embeddings
@@ -119,6 +138,7 @@ def test_architecture(
     print(f"Image embeddings: {image_embeddings.shape}")
     print(f"Text embeddings: {text_embeddings.shape}")
     print(f"Attention weights: {attention_weights.shape}")
+    print("Padding attention check: PASS")
     print(f"Loss: {loss.item():.6f}")
     print(
         f"Gradient check: "
@@ -127,6 +147,7 @@ def test_architecture(
     print("Architecture test: PASS")
 
     del model, outputs, loss
+
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
@@ -193,9 +214,50 @@ def main():
         )
 
         passed += 1
+            # Test model without Attention
+    print("\nTesting: Model without Attention")
+    print("-" * 45)
 
+    no_attention_model = CrossModalRetrievalModel(
+        vocab_size=vocab_size,
+        encoder_type="lstm",
+        embedding_dim=300,
+        hidden_dim=512,
+        num_layers=1,
+        dropout=0.2,
+        bidirectional=False,
+        use_attention=False,
+        pretrained=False,
+        unfreeze_last_block=False,
+    ).to(device)
+
+    no_attention_model.eval()
+
+    with torch.no_grad():
+        no_attention_outputs = no_attention_model(
+            images,
+            captions,
+            return_attention=True,
+        )
+
+    assert no_attention_outputs["image_embeddings"].shape == (2, 512)
+    assert no_attention_outputs["text_embeddings"].shape == (2, 5, 512)
+    assert no_attention_outputs["attention_weights"] is None
+
+    print("Image embeddings: PASS")
+    print("Text embeddings: PASS")
+    print("Attention weights: None (as expected)")
+    print("Model without Attention: PASS")
+
+    del no_attention_model, no_attention_outputs
+
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
     print("\n" + "=" * 55)
-    print(f"RESULT: {passed}/{len(CONFIGURATIONS)} ARCHITECTURES PASSED")
+    print(
+        f"RESULT: {passed}/{len(CONFIGURATIONS)} "
+        "ARCHITECTURES PASSED"
+    )
     print("All architecture integration tests completed!")
     print("=" * 55)
 

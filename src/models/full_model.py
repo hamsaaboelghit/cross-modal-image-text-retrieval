@@ -11,6 +11,7 @@ except ImportError:
     from text_encoder import TextEncoder
     from projection_head import CrossModalProjection
 
+
 class CrossModalRetrievalModel(nn.Module):
 
     def __init__(
@@ -114,11 +115,15 @@ class CrossModalRetrievalModel(nn.Module):
             "text_embeddings": text_embeddings,
         }
 
+        # Return attention weights when available
         if return_attention:
-            output["attention_weights"] = attention_weights.reshape(
-                batch_size,
-                num_captions,
-                captions.size(2),
-            )
+            if attention_weights is not None:
+                output["attention_weights"] = attention_weights.reshape(
+                    batch_size,
+                    num_captions,
+                    captions.size(2),
+                )
+            else:
+                output["attention_weights"] = None
 
         return output
