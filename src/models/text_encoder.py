@@ -9,9 +9,11 @@ from torch.nn.utils.rnn import (
     pad_packed_sequence
 )
 
-from attention import AdditiveAttention
-
-
+try:
+    from .attention import AdditiveAttention
+except ImportError:
+    from attention import AdditiveAttention
+    
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 VOCAB_PATH = (
