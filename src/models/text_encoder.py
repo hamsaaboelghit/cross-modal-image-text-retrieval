@@ -1,7 +1,6 @@
 
 import json
 import math
-import sys
 from pathlib import Path
 
 import torch
@@ -224,7 +223,12 @@ class TextEncoder(nn.Module):
 
         self.output_dim = self.encoder_output_dim
 
-    def forward(self, captions, return_attention=False):
+    def forward(
+        self,
+        captions,
+        return_attention=False,
+        return_sequence=False,
+    ):
 
         if captions.ndim != 2:
             raise ValueError(
@@ -242,6 +246,9 @@ class TextEncoder(nn.Module):
 
         # Padding mask: True means padding
         padding_mask = captions == PAD_IDX
+
+        # Valid-token mask: True means valid token
+        valid_mask = ~padding_mask
 
         # Embedding
         embedded = self.embedding(captions)
@@ -281,8 +288,12 @@ class TextEncoder(nn.Module):
             if self.encoder_type == "lstm":
                 hidden = hidden[0]
 
-        # Build valid-token mask
-        valid_mask = ~padding_mask
+        # Zero out padding positions.
+        # This is particularly important for Transformer outputs.
+        outputs = outputs.masked_fill(
+            padding_mask.unsqueeze(-1),
+            0.0,
+        )
 
         # Attention or pooling
         if self.use_attention:
@@ -318,7 +329,20 @@ class TextEncoder(nn.Module):
 
                 features = hidden[-1]
 
+        # Pooled caption representation
         features = self.output_dropout(features)
+
+        # Preserve the original output when return_sequence=False
+        if return_sequence:
+
+            if return_attention:
+                return (
+                    features,
+                    outputs,
+                    attention_weights,
+                )
+
+            return features, outputs
 
         if return_attention:
             return features, attention_weights
@@ -401,7 +425,6 @@ if __name__ == "__main__":
         )
 
         assert features.shape == (5, expected_dim)
-
         assert torch.isfinite(features).all()
 
         if use_attention:
@@ -421,14 +444,51 @@ if __name__ == "__main__":
         else:
             assert weights is None
 
+        # New sequence-output test
+        with torch.no_grad():
+
+            sequence_result = model(
+                dummy_captions,
+                return_attention=True,
+                return_sequence=True,
+            )
+
+        sequence_features, token_features, sequence_weights = (
+            sequence_result
+        )
+
+        assert sequence_features.shape == (
+            5,
+            expected_dim,
+        )
+
+        assert token_features.shape == (
+            5,
+            34,
+            expected_dim,
+        )
+
+        assert torch.isfinite(token_features).all()
+
+        assert torch.all(
+            token_features[dummy_captions == PAD_IDX] == 0
+        )
+
+        if use_attention:
+            assert sequence_weights.shape == (5, 34)
+        else:
+            assert sequence_weights is None
+
         print(
             f"{encoder_type.upper():11} | "
             f"Bi={bidirectional} | "
             f"Attention={use_attention} | "
-            f"Output={list(features.shape)} | PASS"
+            f"Output={list(features.shape)} | "
+            f"Sequence={list(token_features.shape)} | PASS"
         )
 
         del model, features, weights
+        del sequence_features, token_features, sequence_weights
 
         if device.type == "cuda":
             torch.cuda.empty_cache()
