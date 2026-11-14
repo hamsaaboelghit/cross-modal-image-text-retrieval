@@ -1,4 +1,3 @@
-
 # VisionMatch AI
 ### Cross-Modal Image-Text Retrieval Using Deep Learning
 
@@ -74,6 +73,7 @@ The vocabulary is built independently from each fold's training captions. Valida
 - Shared embedding space
 
 ### 2. Sequential Architectures
+
 The project supports:
 
 - RNN
@@ -84,15 +84,17 @@ The project supports:
 - Bidirectional GRU
 
 ### 3. Transformer Architecture
+
 A Transformer-based text encoder is implemented to model relationships between words in captions.
 
 ### 4. Advanced Cross-Modal Architecture
+
 The advanced model extends the retrieval architecture with:
 
 - ResNet50 visual feature extraction
 - Spatial image representations
 - Sequential text representations
-- Multi-head Cross-Modal Attention
+- Multi-Head Cross-Modal Attention
 - Image-text matching score prediction
 
 ---
@@ -110,13 +112,66 @@ These mechanisms help the model focus on relevant information across text tokens
 
 ## Loss Functions
 
-Three loss functions are implemented and integrated:
+Three loss functions are implemented:
 
 1. Multi-Positive InfoNCE Loss
 2. Margin-Based Contrastive Loss
 3. Triplet Contrastive Loss
 
-Each objective is available for future comparative training experiments.
+Each objective is integrated into the training package for comparative training experiments.
+
+---
+
+## Training Pipeline
+
+A modular training pipeline has been implemented to support model training, validation, checkpoint management, and experiment tracking.
+
+### Training Configuration
+- Configurable number of epochs and batch size
+- Learning rate and weight decay
+- Optimizer and scheduler selection
+- Loss function selection
+- Gradient clipping
+- Mixed-precision training support
+- Device selection (CPU/CUDA)
+- Fold and random seed configuration
+
+### Optimizers
+- Adam
+- AdamW
+- SGD
+
+### Learning Rate Schedulers
+- StepLR
+- CosineAnnealingLR
+- ReduceLROnPlateau
+- No scheduler
+
+### Training and Validation
+- Modular Trainer and Evaluator components
+- Training and validation loss tracking
+- Gradient clipping support
+- Optional CUDA automatic mixed precision
+- Global training step tracking
+
+### Checkpoint Management
+- Latest checkpoint saving
+- Best model checkpoint saving
+- Optional per-epoch checkpoint saving
+- Model, optimizer, and scheduler state restoration
+- Training progress and early-stopping state restoration
+
+### Experiment Logging
+- CSV-based training logs
+- Training and validation loss tracking
+- Learning-rate tracking
+- Epoch and training-step tracking
+
+### Early Stopping
+- Configurable patience
+- Minimum improvement threshold
+- Early-stopping state persistence
+- Early-stopping state restoration when resuming training
 
 ---
 
@@ -168,6 +223,15 @@ cross-modal-image-text-retrieval/
 - [x] Model architecture integration tests
 - [x] Loss integration tests
 - [x] Cross-modal model integration tests
+- [x] Training configuration system
+- [x] Optimizer and scheduler implementation
+- [x] Training loop implementation
+- [x] Validation loop implementation
+- [x] Checkpoint saving and loading
+- [x] Training logger implementation
+- [x] Early stopping implementation
+- [x] Training pipeline integration tests
+- [x] Full training pipeline tests
 
 ### Verification Summary
 
@@ -180,22 +244,29 @@ The implemented components have passed their current integration and functionali
 - Forward and backward propagation
 - Gradient existence and finiteness
 - Model configuration validation
+- Optimizer updates and scheduler behavior
+- Training and validation execution
+- Checkpoint saving and restoration
+- Training logger verification
+- Early-stopping state saving and restoration
+- Training history and global-step validation
 
-**Note:** These are implementation and integration test results, not retrieval performance measurements. Actual model training and evaluation have not yet been completed.
+**Important:** Training pipeline tests were performed using synthetic data. These tests verify implementation functionality and do not represent actual Flickr30k training results or retrieval performance.
 
 ---
 
 ## Upcoming Work
 
-- [ ] Training pipeline implementation
-- [ ] Optimizer and learning-rate configuration
-- [ ] Comparative experiments across model architectures
-- [ ] Contrastive loss comparison
+- [ ] Run actual training experiments on Flickr30k
+- [ ] Compare baseline, sequential, Transformer, and advanced architectures
+- [ ] Compare the implemented contrastive loss functions
 - [ ] Hyperparameter tuning
 - [ ] Ablation studies
-- [ ] Retrieval evaluation using Recall@K and other metrics
+- [ ] Implement retrieval evaluation metrics (Recall@1, Recall@5, Recall@10, Mean Recall, MRR, and Median Rank)
+- [ ] Perform five-fold cross-validation experiments
+- [ ] Run experiments with multiple random seeds
 - [ ] Error analysis and computational cost analysis
-- [ ] Interactive demonstration
+- [ ] Develop an interactive demonstration
 - [ ] Final experimental report
 
 ---
