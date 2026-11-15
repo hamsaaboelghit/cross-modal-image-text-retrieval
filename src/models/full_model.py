@@ -91,6 +91,76 @@ class CrossModalRetrievalModel(nn.Module):
             self.cross_modal_attention = None
             self.matching_head = None
 
+    def encode_image(self, images):
+        """
+        Encode images independently for image-to-text retrieval.
+
+        Args:
+            images: Tensor of shape [B, 3, H, W].
+
+        Returns:
+            Normalized image embeddings of shape [B, 512].
+        """
+
+        if not isinstance(images, torch.Tensor):
+            raise TypeError("Images must be a torch.Tensor.")
+
+        if images.ndim != 4:
+            raise ValueError(
+                "Images must have shape [B, 3, H, W]."
+            )
+
+        if images.size(1) != 3:
+            raise ValueError(
+                "Images must have exactly 3 RGB channels."
+            )
+
+        if images.size(0) == 0:
+            raise ValueError("Image batch cannot be empty.")
+
+        image_features = self.image_encoder(images)
+
+        image_embeddings = (
+            self.projection.image_projection(image_features)
+        )
+
+        return image_embeddings
+
+    def encode_text(self, captions):
+        """
+        Encode captions independently for text-to-image retrieval.
+
+        Args:
+            captions: Tensor of shape [B, L].
+
+        Returns:
+            Normalized text embeddings of shape [B, 512].
+        """
+
+        if not isinstance(captions, torch.Tensor):
+            raise TypeError("Captions must be a torch.Tensor.")
+
+        if captions.ndim != 2:
+            raise ValueError(
+                "Captions must have shape [B, L]."
+            )
+
+        if captions.size(0) == 0:
+            raise ValueError("Caption batch cannot be empty.")
+
+        if captions.size(1) == 0:
+            raise ValueError(
+                "Caption sequence length must be greater than zero."
+            )
+
+        text_features = self.text_encoder(captions)
+
+        text_embeddings = (
+            self.projection.text_projection(text_features)
+        )
+
+        return text_embeddings
+
     def forward(
         self,
         images,
