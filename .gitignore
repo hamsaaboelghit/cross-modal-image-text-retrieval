@@ -240,3 +240,6 @@ checkpoints/
 *.tar
 *.tar.gz
 *.rar
+# Local experiment outputs
+results/
+runs/
