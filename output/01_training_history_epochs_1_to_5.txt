@@ -1,0 +1,41 @@
+﻿VISIONMATCH AI - REAL TRAINING HISTORY
+======================================
+
+Dataset:
+Flickr30k - Fold 1
+
+Model:
+ResNet50 Image Encoder + LSTM Text Encoder
+
+Training Configuration:
+Batch Size: 8
+Pretrained: True
+Mixed Precision (AMP): True
+Device: NVIDIA GeForce RTX 4050 Laptop GPU
+
+Training Progress:
+Epoch | Training Loss | Validation Loss
+---------------------------------------
+1     | 1.893056      | 1.627354
+2     | 1.512387      | 1.520306
+3     | 1.387908      | 1.459718
+4     | 1.301127      | 1.424875
+5     | 1.234446      | 1.403856
+
+Total Training Batches:
+12,715
+
+Best Checkpoint:
+checkpoints/real_fold1/best_model.pth
+
+Best Epoch:
+5
+
+Best Validation Loss:
+1.403856
+
+Validation retrieval evaluation:
+Completed for Epoch 1 and Epoch 5.
+
+Test Set:
+NOT USED - kept untouched.

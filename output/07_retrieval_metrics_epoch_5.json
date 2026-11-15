@@ -1,0 +1,28 @@
+{
+    "text_to_image": {
+        "recall@1": 0.03495870903134346,
+        "recall@5": 0.18639402091503143,
+        "recall@10": 0.28497835993766785,
+        "mean_recall": 0.16877702996134758,
+        "median_rank": 33.0,
+        "mrr": 0.11843063682317734,
+        "num_queries": 25430.0,
+        "num_candidates": 5086.0
+    },
+    "image_to_text": {
+        "recall@1": 0.05289028584957123,
+        "recall@5": 0.2377113699913025,
+        "recall@10": 0.3470310568809509,
+        "mean_recall": 0.21254423757394156,
+        "median_rank": 24.0,
+        "mrr": 0.14889807999134064,
+        "num_queries": 5086.0,
+        "num_candidates": 25430.0
+    },
+    "num_images": 5086,
+    "captions_per_image": 5,
+    "embedding_dim": 512,
+    "checkpoint_epoch": 5,
+    "training_loss": 1.2344456451597936,
+    "validation_loss": 1.4038559312760432
+}
