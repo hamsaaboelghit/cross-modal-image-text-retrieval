@@ -23,7 +23,7 @@ VisionMatch AI follows a cross-modal retrieval pipeline consisting of:
 The system supports two retrieval directions:
 
 1. **Text-to-Image Retrieval:** Retrieve relevant images using a natural language query.
-2. **Image-to-Text Retrieval:** Retrieve matching descriptions for an input image.
+2. **Image-to-Text Retrieval:** Retrieve matching captions for an input image.
 
 ---
 
@@ -189,13 +189,15 @@ A modular training pipeline supports model training, validation, checkpoint mana
 
 ## Retrieval System
 
-The retrieval system uses precomputed image and text embeddings to perform efficient similarity-based search.
+The retrieval system uses precomputed image and text embeddings to perform similarity-based search.
 
 ### Retrieval Gallery
 
-A retrieval gallery is constructed from the Fold 1 development dataset, combining the training and validation splits.
+The Retrieval Gallery stores precomputed embeddings and their associated metadata for efficient retrieval.
 
-It stores:
+For Fold 1, the gallery is constructed from the training and validation splits of the development dataset.
+
+It contains:
 
 - Image embeddings
 - Five text embeddings per image
@@ -203,7 +205,7 @@ It stores:
 - Original captions
 - Gallery metadata
 
-The current gallery contains:
+#### Gallery Statistics
 
 | Statistic | Value |
 |---|---:|
@@ -213,31 +215,52 @@ The current gallery contains:
 | Captions per Image | 5 |
 | Embedding Dimension | 512 |
 
-The gallery is generated using the trained ResNet50-LSTM model and saved locally as a PyTorch file.
+The embeddings are extracted using the trained ResNet50-LSTM model.
 
-**Gallery location:** `results/retrieval_gallery_fold1/gallery.pt`
+The gallery is serialized as a PyTorch file:
+
+`results/retrieval_gallery_fold1/gallery.pt`
 
 The independent test split is excluded from gallery construction to preserve the evaluation protocol.
 
 ### Retrieval Engine
 
-The Retrieval Engine performs similarity-based search using normalized embeddings.
+The Retrieval Engine performs similarity-based search between input query embeddings and precomputed gallery embeddings.
 
 It supports:
 
-- Text-to-Image retrieval using text query embeddings.
-- Image-to-Text retrieval using image embeddings.
+- Text-to-Image retrieval.
+- Image-to-Text retrieval.
 - Top-K result ranking.
 - Similarity score calculation.
-- Returning matching filenames and captions.
+- Returning matching image filenames and captions.
+- Preserving image-caption associations.
 
-The engine is designed to work with precomputed gallery embeddings rather than re-encoding the entire dataset for every search request.
+The engine uses normalized embeddings and dot-product similarity to rank the retrieval candidates.
+
+### Retrieval Operations
+
+**Text-to-Image Retrieval**
+
+1. Receive a natural language query.
+2. Convert the query into tokens using the trained vocabulary.
+3. Extract a text embedding using the Text Encoder.
+4. Compare the query embedding against gallery image embeddings.
+5. Return the Top-K most relevant images with similarity scores.
+
+**Image-to-Text Retrieval**
+
+1. Receive an input image.
+2. Preprocess the image using the model's image transformation pipeline.
+3. Extract an image embedding using the Image Encoder.
+4. Compare the query embedding against gallery text embeddings.
+5. Return the Top-K matching captions with similarity scores and image metadata.
 
 ---
 
 ## Backend
 
-The project includes a FastAPI backend that provides the foundation for connecting the trained deep learning model to the application interfaces.
+The project includes a FastAPI backend that provides the foundation for connecting the trained deep learning model and retrieval functionality to application interfaces.
 
 ### Model Service
 
@@ -251,13 +274,34 @@ The Model Service is responsible for:
 - Extracting text embeddings.
 - Running inference on CPU or CUDA.
 
+### Retrieval Service
+
+The Retrieval Service integrates the Model Service, Retrieval Gallery, and Retrieval Engine into a unified search interface.
+
+It provides two main operations:
+
+- **Text-to-Image:** Converts a natural language query into a text embedding and retrieves the most relevant images.
+- **Image-to-Text:** Converts an input image into an image embedding and retrieves the most relevant captions.
+
+The service returns ranked retrieval results containing similarity scores and associated image or caption information.
+
+The retrieval operations are exposed through:
+
+```python
+service.search_text(query, top_k=5)
+
+service.search_image(image, top_k=5)
+```
+
+The Retrieval Service loads the trained model and gallery and initializes the Retrieval Engine for inference.
+
 ### API Framework
 
 - FastAPI
 - Uvicorn
 - CORS configuration
 
-The backend exposes health-check and model-service functionality as part of the application architecture.
+The backend provides the foundation for exposing retrieval functionality through API endpoints and connecting it to the application interfaces.
 
 ---
 
@@ -270,7 +314,8 @@ cross-modal-image-text-retrieval/
 │   ├── backend/
 │   │   ├── __init__.py
 │   │   ├── main.py
-│   │   └── model_service.py
+│   │   ├── model_service.py
+│   │   └── retrieval_service.py
 │   │
 │   ├── web/
 │   └── desktop/
@@ -295,8 +340,10 @@ cross-modal-image-text-retrieval/
 │   ├── data/
 │   ├── models/
 │   ├── retrieval/
+│   │   ├── __init__.py
 │   │   ├── retrieval_engine.py
 │   │   └── build_gallery.py
+│   │
 │   └── training/
 │
 ├── requirements.txt
