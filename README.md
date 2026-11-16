@@ -1,4 +1,5 @@
 # VisionMatch AI
+
 ### Cross-Modal Image-Text Retrieval Using Deep Learning
 
 VisionMatch AI is a deep learning project for **bidirectional image-text retrieval and semantic representation learning**.
@@ -260,7 +261,7 @@ The engine uses normalized embeddings and dot-product similarity to rank the ret
 
 ## Backend
 
-The project includes a FastAPI backend that provides the foundation for connecting the trained deep learning model and retrieval functionality to application interfaces.
+The project includes a FastAPI backend that connects the trained deep learning model and retrieval system to application interfaces.
 
 ### Model Service
 
@@ -295,13 +296,110 @@ service.search_image(image, top_k=5)
 
 The Retrieval Service loads the trained model and gallery and initializes the Retrieval Engine for inference.
 
+### FastAPI Endpoints
+
+The backend exposes REST API endpoints for interacting with the retrieval system.
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/` | Checks whether the backend is running. |
+| GET | `/health` | Returns backend status and model loading state. |
+| POST | `/search/text` | Retrieves relevant images using a text query. |
+| POST | `/search/image` | Retrieves matching captions using an uploaded image. |
+
+#### 1. Root Endpoint
+
+`GET /`
+
+Returns a message confirming that the backend is running.
+
+#### 2. Health Check
+
+`GET /health`
+
+Returns the backend status and whether the Retrieval Service is loaded.
+
+Example response:
+
+```json
+{
+    "status": "ok",
+    "backend": "VisionMatch AI",
+    "model_loaded": true
+}
+```
+
+#### 3. Text-to-Image Search
+
+`POST /search/text`
+
+Accepts a JSON request containing a natural language query and the desired number of results.
+
+**Request Body:**
+
+```json
+{
+    "query": "A person riding a bicycle on the street",
+    "top_k": 5
+}
+```
+
+**Response:**
+
+Returns the query, retrieval mode, requested number of results, and ranked image results with similarity scores.
+
+Each result includes the image filename and its similarity score.
+
+#### 4. Image-to-Text Search
+
+`POST /search/image`
+
+Accepts an uploaded image using `multipart/form-data` and retrieves the most relevant captions.
+
+**Parameters:**
+
+- `file`: Input image file (required).
+- `top_k`: Number of captions to retrieve (default: 5).
+
+**Example Request:**
+
+```bash
+curl -X POST \
+  "http://127.0.0.1:8000/search/image?top_k=5" \
+  -F "file=@1000092795.jpg"
+```
+
+**Response:**
+
+Returns the uploaded filename, retrieval mode, and ranked caption results with similarity scores and associated image metadata.
+
+### API Validation and Error Handling
+
+The API includes input validation and error handling:
+
+- Text queries must contain between 1 and 1000 characters.
+- `top_k` must be between 1 and 50.
+- Invalid image files return HTTP 400.
+- Invalid parameter values return HTTP 422.
+- An unavailable Retrieval Service returns HTTP 503.
+
+### API Documentation
+
+Interactive API documentation is available through Swagger UI:
+
+`http://127.0.0.1:8000/docs`
+
+The backend runs locally using Uvicorn:
+
+```bash
+python -m uvicorn app.backend.main:app --reload
+```
+
 ### API Framework
 
 - FastAPI
 - Uvicorn
 - CORS configuration
-
-The backend provides the foundation for exposing retrieval functionality through API endpoints and connecting it to the application interfaces.
 
 ---
 
