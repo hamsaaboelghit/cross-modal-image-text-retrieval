@@ -1,9 +1,9 @@
 # VisionMatch AI
 ### Cross-Modal Image-Text Retrieval Using Deep Learning
 
-An advanced deep learning project for **bidirectional image-text retrieval and semantic understanding**.
+VisionMatch AI is a deep learning project for **bidirectional image-text retrieval and semantic representation learning**.
 
-VisionMatch AI aims to learn a shared embedding space for images and natural language descriptions, enabling users to retrieve relevant images using text queries and find matching descriptions for input images.
+The system learns a shared embedding space for images and natural language descriptions, allowing users to retrieve relevant images using text queries and find matching captions for input images.
 
 The project explores CNN-based visual encoding, sequential text modeling, Transformer architectures, attention mechanisms, cross-modal interaction, and contrastive learning.
 
@@ -11,25 +11,27 @@ The project explores CNN-based visual encoding, sequential text modeling, Transf
 
 ## Project Overview
 
-The system follows a cross-modal retrieval pipeline:
+VisionMatch AI follows a cross-modal retrieval pipeline consisting of:
 
 - **Image Encoder:** Extracts visual representations from images using CNN architectures.
 - **Text Encoder:** Converts natural language captions into meaningful feature representations.
-- **Projection Heads:** Map image and text features into a shared embedding space.
+- **Projection Layers:** Map image and text features into a shared embedding space.
 - **Attention Mechanisms:** Focus on relevant visual and textual features.
 - **Cross-Modal Attention:** Enables interaction between image regions and text tokens.
-- **Contrastive Learning:** Trains the model to align matching image-caption pairs.
+- **Contrastive Learning:** Aligns matching image-caption pairs in the shared embedding space.
 
-The project supports two retrieval directions:
+The system supports two retrieval directions:
 
-1. Image-to-Text Retrieval
-2. Text-to-Image Retrieval
+1. **Text-to-Image Retrieval:** Retrieve relevant images using a natural language query.
+2. **Image-to-Text Retrieval:** Retrieve matching descriptions for an input image.
 
 ---
 
 ## Dataset
 
-**Flickr30k** is used as the primary dataset.
+### Flickr30k
+
+Flickr30k is the primary dataset used for training and evaluating the image-text retrieval models.
 
 | Statistic | Value |
 |---|---:|
@@ -67,6 +69,7 @@ The vocabulary is built independently from each fold's training captions. Valida
 ## Model Architectures
 
 ### 1. Baseline Model
+
 - CNN-based image encoder
 - Embedding-based text encoder
 - Mean pooling for caption representation
@@ -74,7 +77,7 @@ The vocabulary is built independently from each fold's training captions. Valida
 
 ### 2. Sequential Architectures
 
-The project supports:
+The project supports several recurrent text encoders:
 
 - RNN
 - LSTM
@@ -83,13 +86,15 @@ The project supports:
 - Bidirectional LSTM
 - Bidirectional GRU
 
+These architectures model sequential dependencies between words in natural language captions.
+
 ### 3. Transformer Architecture
 
-A Transformer-based text encoder is implemented to model relationships between words in captions.
+A Transformer-based text encoder is implemented to model contextual relationships between words in captions.
 
 ### 4. Advanced Cross-Modal Architecture
 
-The advanced model extends the retrieval architecture with:
+The advanced architecture extends the retrieval framework with:
 
 - ResNet50 visual feature extraction
 - Spatial image representations
@@ -112,21 +117,22 @@ These mechanisms help the model focus on relevant information across text tokens
 
 ## Loss Functions
 
-Three loss functions are implemented:
+Three contrastive learning objectives are implemented:
 
 1. Multi-Positive InfoNCE Loss
 2. Margin-Based Contrastive Loss
 3. Triplet Contrastive Loss
 
-Each objective is integrated into the training package for comparative training experiments.
+These objectives support comparative experiments for learning aligned image and text representations.
 
 ---
 
 ## Training Pipeline
 
-A modular training pipeline has been implemented to support model training, validation, checkpoint management, and experiment tracking.
+A modular training pipeline supports model training, validation, checkpoint management, and experiment tracking.
 
 ### Training Configuration
+
 - Configurable number of epochs and batch size
 - Learning rate and weight decay
 - Optimizer and scheduler selection
@@ -137,17 +143,20 @@ A modular training pipeline has been implemented to support model training, vali
 - Fold and random seed configuration
 
 ### Optimizers
+
 - Adam
 - AdamW
 - SGD
 
 ### Learning Rate Schedulers
+
 - StepLR
 - CosineAnnealingLR
 - ReduceLROnPlateau
 - No scheduler
 
 ### Training and Validation
+
 - Modular Trainer and Evaluator components
 - Training and validation loss tracking
 - Gradient clipping support
@@ -155,6 +164,7 @@ A modular training pipeline has been implemented to support model training, vali
 - Global training step tracking
 
 ### Checkpoint Management
+
 - Latest checkpoint saving
 - Best model checkpoint saving
 - Optional per-epoch checkpoint saving
@@ -162,12 +172,14 @@ A modular training pipeline has been implemented to support model training, vali
 - Training progress and early-stopping state restoration
 
 ### Experiment Logging
+
 - CSV-based training logs
 - Training and validation loss tracking
 - Learning-rate tracking
 - Epoch and training-step tracking
 
 ### Early Stopping
+
 - Configurable patience
 - Minimum improvement threshold
 - Early-stopping state persistence
@@ -175,10 +187,96 @@ A modular training pipeline has been implemented to support model training, vali
 
 ---
 
+## Retrieval System
+
+The retrieval system uses precomputed image and text embeddings to perform efficient similarity-based search.
+
+### Retrieval Gallery
+
+A retrieval gallery is constructed from the Fold 1 development dataset, combining the training and validation splits.
+
+It stores:
+
+- Image embeddings
+- Five text embeddings per image
+- Original image filenames
+- Original captions
+- Gallery metadata
+
+The current gallery contains:
+
+| Statistic | Value |
+|---|---:|
+| Development Images | 25,426 |
+| Image Embeddings | 25,426 |
+| Text Embeddings | 127,130 |
+| Captions per Image | 5 |
+| Embedding Dimension | 512 |
+
+The gallery is generated using the trained ResNet50-LSTM model and saved locally as a PyTorch file.
+
+**Gallery location:** `results/retrieval_gallery_fold1/gallery.pt`
+
+The independent test split is excluded from gallery construction to preserve the evaluation protocol.
+
+### Retrieval Engine
+
+The Retrieval Engine performs similarity-based search using normalized embeddings.
+
+It supports:
+
+- Text-to-Image retrieval using text query embeddings.
+- Image-to-Text retrieval using image embeddings.
+- Top-K result ranking.
+- Similarity score calculation.
+- Returning matching filenames and captions.
+
+The engine is designed to work with precomputed gallery embeddings rather than re-encoding the entire dataset for every search request.
+
+---
+
+## Backend
+
+The project includes a FastAPI backend that provides the foundation for connecting the trained deep learning model to the application interfaces.
+
+### Model Service
+
+The Model Service is responsible for:
+
+- Loading the trained model checkpoint.
+- Loading the corresponding vocabulary.
+- Preprocessing input images.
+- Tokenizing and encoding text queries.
+- Extracting image embeddings.
+- Extracting text embeddings.
+- Running inference on CPU or CUDA.
+
+### API Framework
+
+- FastAPI
+- Uvicorn
+- CORS configuration
+
+The backend exposes health-check and model-service functionality as part of the application architecture.
+
+---
+
 ## Project Structure
 
 ```text
 cross-modal-image-text-retrieval/
+│
+├── app/
+│   ├── backend/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   └── model_service.py
+│   │
+│   ├── web/
+│   └── desktop/
+│
+├── checkpoints/
+│   └── real_fold1/
 │
 ├── data/
 │   ├── raw/
@@ -189,85 +287,21 @@ cross-modal-image-text-retrieval/
 │   ├── model_configs.py
 │   └── test_model_configs.py
 │
+├── results/
+│   ├── real_fold1/
+│   └── retrieval_gallery_fold1/
+│
 ├── src/
 │   ├── data/
 │   ├── models/
+│   ├── retrieval/
+│   │   ├── retrieval_engine.py
+│   │   └── build_gallery.py
 │   └── training/
-│
-├── app/
 │
 ├── requirements.txt
 └── README.md
 ```
-
----
-
-## Implementation & Testing Status
-
-### Completed
-
-- [x] Flickr30k dataset inspection and validation
-- [x] Caption preparation and vocabulary construction
-- [x] Five-fold data splitting and caption encoding
-- [x] Image preprocessing and dataset loading
-- [x] Baseline retrieval model
-- [x] RNN, LSTM, and GRU text encoders
-- [x] Bidirectional sequential architectures
-- [x] Transformer text encoder
-- [x] Additive Attention
-- [x] Cross-Modal Attention
-- [x] Advanced cross-modal retrieval architecture
-- [x] Three contrastive loss implementations
-- [x] Model configuration system
-- [x] Data pipeline integration tests
-- [x] Model architecture integration tests
-- [x] Loss integration tests
-- [x] Cross-modal model integration tests
-- [x] Training configuration system
-- [x] Optimizer and scheduler implementation
-- [x] Training loop implementation
-- [x] Validation loop implementation
-- [x] Checkpoint saving and loading
-- [x] Training logger implementation
-- [x] Early stopping implementation
-- [x] Training pipeline integration tests
-- [x] Full training pipeline tests
-
-### Verification Summary
-
-The implemented components have passed their current integration and functionality tests, including:
-
-- Model output shape validation
-- Numerical stability checks
-- Embedding normalization
-- Padding and attention mask validation
-- Forward and backward propagation
-- Gradient existence and finiteness
-- Model configuration validation
-- Optimizer updates and scheduler behavior
-- Training and validation execution
-- Checkpoint saving and restoration
-- Training logger verification
-- Early-stopping state saving and restoration
-- Training history and global-step validation
-
-**Important:** Training pipeline tests were performed using synthetic data. These tests verify implementation functionality and do not represent actual Flickr30k training results or retrieval performance.
-
----
-
-## Upcoming Work
-
-- [ ] Run actual training experiments on Flickr30k
-- [ ] Compare baseline, sequential, Transformer, and advanced architectures
-- [ ] Compare the implemented contrastive loss functions
-- [ ] Hyperparameter tuning
-- [ ] Ablation studies
-- [ ] Implement retrieval evaluation metrics (Recall@1, Recall@5, Recall@10, Mean Recall, MRR, and Median Rank)
-- [ ] Perform five-fold cross-validation experiments
-- [ ] Run experiments with multiple random seeds
-- [ ] Error analysis and computational cost analysis
-- [ ] Develop an interactive demonstration
-- [ ] Final experimental report
 
 ---
 
@@ -280,9 +314,13 @@ The implemented components have passed their current integration and functionali
 - Pandas
 - OpenCV
 - Scikit-learn
+- FastAPI
+- Uvicorn
 
 ---
 
 ## Project Goal
 
-The main goal is to investigate how different deep learning architectures and cross-modal learning techniques affect image-text retrieval performance, while maintaining a fair experimental setup and reliable evaluation methodology.
+The main goal of VisionMatch AI is to investigate how different deep learning architectures and cross-modal learning techniques affect image-text retrieval performance.
+
+The project focuses on learning meaningful shared representations, comparing visual and sequential feature extraction methods, and developing a practical bidirectional retrieval system with a reliable experimental evaluation methodology.
