@@ -1,12 +1,9 @@
 
 import json
-import random
-import time
 from pathlib import Path
 
 import numpy as np
-import torch
-from torch.utils.data import DataLoader
+import tensorflow as tf
 
 from src.data.flickr30k_dataset import Flickr30kDataset
 from src.models.full_model import CrossModalRetrievalModel
@@ -16,92 +13,91 @@ from src.training.trainer import Trainer
 from src.training.evaluator import Evaluator
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+FOLD = 1
+SEED = 42
+BATCH_SIZE = 2
+
+VOCAB_PATH = (
+    PROJECT_ROOT
+    / "data"
+    / "processed"
+    / "flickr30k"
+    / "vocabularies"
+    / f"fold_{FOLD}_vocab.json"
+)
+
+SMOKE_CHECKPOINT_DIR = (
+    PROJECT_ROOT
+    / "checkpoints"
+    / "smoke_test"
+)
+
+
 def main():
-    print("\n" + "=" * 60)
-    print("VISIONMATCH AI - FULL FLICKR30K TRAINING")
-    print("=" * 60)
+    print("\n" + "=" * 65)
+    print("VISIONMATCH AI - TENSORFLOW TRAINING SMOKE TEST")
+    print("=" * 65)
 
-    seed = 42
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+    tf.keras.utils.set_random_seed(SEED)
 
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
+    if not VOCAB_PATH.is_file():
+        raise FileNotFoundError(
+            f"Vocabulary not found: {VOCAB_PATH}"
+        )
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"\nDevice: {device}")
+    with VOCAB_PATH.open("r", encoding="utf-8") as file:
+        vocabulary = json.load(file)
 
-    if device == "cuda":
-        print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print(f"Vocabulary size: {len(vocabulary)}")
 
-    vocab_path = Path(
-        "data/processed/flickr30k/"
-        "vocabularies/fold_1_vocab.json"
-    )
-
-    with open(vocab_path, "r", encoding="utf-8") as f:
-        vocabulary = json.load(f)
-
-    vocab_size = len(vocabulary)
-    print(f"Vocabulary size: {vocab_size}")
-
-    train_dataset = Flickr30kDataset(
-        fold_number=1,
+    train_data = Flickr30kDataset(
+        fold_number=FOLD,
         split="train",
     )
 
-    val_dataset = Flickr30kDataset(
-        fold_number=1,
+    validation_data = Flickr30kDataset(
+        fold_number=FOLD,
         split="validation",
     )
 
-    print(f"Training images: {len(train_dataset)}")
-    print(f"Validation images: {len(val_dataset)}")
+    print(f"Training images available: {len(train_data):,}")
+    print(f"Validation images available: {len(validation_data):,}")
+
+    # Use only one batch for this smoke test.
+    train_dataset = train_data.as_dataset(
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        seed=SEED,
+        prefetch=False,
+    ).take(1)
+
+    validation_dataset = validation_data.as_dataset(
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        prefetch=False,
+    ).take(1)
 
     config = TrainingConfig(
         epochs=1,
-        batch_size=8,
+        batch_size=BATCH_SIZE,
         learning_rate=1e-4,
         weight_decay=1e-4,
         optimizer="adamw",
         scheduler="none",
         loss_type="info_nce",
         temperature=0.07,
-        use_amp=True,
-        num_workers=0,
-        pin_memory=(device == "cuda"),
-        drop_last=False,
-        seed=seed,
-        fold=1,
-        device=device,
+        use_amp=False,
+        seed=SEED,
+        fold=FOLD,
+        device="auto",
+        checkpoint_dir=str(SMOKE_CHECKPOINT_DIR),
+        log_dir="runs/smoke_test",
     )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config.batch_size,
-        shuffle=True,
-        num_workers=0,
-        pin_memory=config.pin_memory,
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=config.batch_size,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=config.pin_memory,
-    )
-
-    print(f"Training batches: {len(train_loader)}")
-    print(f"Validation batches: {len(val_loader)}")
-    print(f"Batch size: {config.batch_size}")
-    print(f"Mixed precision requested: {config.use_amp}")
-
-    print("\nInitializing ResNet50 + LSTM...")
 
     model = CrossModalRetrievalModel(
-        vocab_size=vocab_size,
+        vocab_size=len(vocabulary),
         encoder_type="lstm",
         embedding_dim=300,
         hidden_dim=512,
@@ -109,8 +105,9 @@ def main():
         dropout=0.2,
         bidirectional=False,
         use_attention=True,
-        pretrained=True,
+        pretrained=False,
         unfreeze_last_block=False,
+        use_cross_modal_attention=False,
     )
 
     loss_fn = MultiPositiveInfoNCELoss(
@@ -123,17 +120,19 @@ def main():
         config=config,
     )
 
-    print("\nStarting full training epoch...")
-    start_time = time.time()
+    print("\nChecking one training batch...")
 
-    train_loss = trainer.train_epoch(train_loader)
+    train_loss = trainer.train_epoch(train_dataset)
 
-    training_time = time.time() - start_time
+    if not np.isfinite(train_loss):
+        raise FloatingPointError(
+            f"Invalid training loss: {train_loss}"
+        )
 
-    print(f"\nTraining loss: {train_loss:.6f}")
-    print(f"Training time: {training_time / 60:.2f} minutes")
+    print(f"One-batch training loss: {train_loss:.6f}")
+    print("Training step: PASS")
 
-    print("\nStarting full validation...")
+    print("\nChecking one validation batch...")
 
     evaluator = Evaluator(
         model=model,
@@ -141,52 +140,67 @@ def main():
         config=config,
     )
 
-    validation_results = evaluator.evaluate(val_loader)
-    val_loss = validation_results["val_loss"]
-
-    print(f"Validation loss: {val_loss:.6f}")
-
-    checkpoint_dir = Path("checkpoints/real_fold1")
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
-    checkpoint_path = checkpoint_dir / "epoch_1.pth"
-
-    torch.save(
-        {
-            "epoch": 1,
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": trainer.optimizer.state_dict(),
-            "train_loss": train_loss,
-            "val_loss": val_loss,
-            "vocab_size": vocab_size,
-            "fold": 1,
-            "model_type": "ResNet50-LSTM",
-        },
-        checkpoint_path,
+    validation_results = evaluator.evaluate(
+        validation_dataset
     )
 
-    total_time = time.time() - start_time
+    val_loss = float(validation_results["val_loss"])
 
-    assert np.isfinite(train_loss)
-    assert np.isfinite(val_loss)
-
-    print("\n" + "=" * 60)
-    print("FULL FLICKR30K TRAINING COMPLETED")
-    print("=" * 60)
-    print(f"Training loss: {train_loss:.6f}")
-    print(f"Validation loss: {val_loss:.6f}")
-    print(f"Training images: {len(train_dataset)}")
-    print(f"Validation images: {len(val_dataset)}")
-    print(f"Training batches: {trainer.global_step}")
-    print(f"Total time: {total_time / 60:.2f} minutes")
-    print(f"Checkpoint: {checkpoint_path}")
-
-    if device == "cuda":
-        print(
-            "Peak GPU memory: "
-            f"{torch.cuda.max_memory_allocated() / 1024**3:.2f} GB"
+    if not np.isfinite(val_loss):
+        raise FloatingPointError(
+            f"Invalid validation loss: {val_loss}"
         )
 
+    print(f"One-batch validation loss: {val_loss:.6f}")
+    print("Validation step: PASS")
+
+    # Check that the model produces valid embeddings.
+    sample_batch = next(
+        iter(
+            validation_data.as_dataset(
+                batch_size=BATCH_SIZE,
+                shuffle=False,
+                prefetch=False,
+            ).take(1)
+        )
+    )
+
+    outputs = model(
+        sample_batch["image"],
+        sample_batch["captions"],
+        training=False,
+    )
+
+    image_embeddings = outputs["image_embeddings"]
+    text_embeddings = outputs["text_embeddings"]
+
+    tf.debugging.assert_all_finite(
+        image_embeddings,
+        "Image embeddings contain NaN or Inf.",
+    )
+
+    tf.debugging.assert_all_finite(
+        text_embeddings,
+        "Text embeddings contain NaN or Inf.",
+    )
+
+    tf.debugging.assert_near(
+        tf.norm(image_embeddings, axis=-1),
+        tf.ones((BATCH_SIZE,)),
+        atol=1e-3,
+        message="Image embeddings are not normalized.",
+    )
+
+    print("Image embeddings: PASS")
+    print("Text embeddings: PASS")
+    print("Embedding normalization: PASS")
+
+    print("\n" + "=" * 65)
+    print("ALL SMOKE TEST CHECKS PASSED")
+    print("=" * 65)
+    print("Only one training batch was used.")
+    print("Only one validation batch was used.")
+    print("The full dataset was NOT trained.")
     print("Test split was NOT used.")
 
 

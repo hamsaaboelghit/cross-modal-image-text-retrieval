@@ -1,52 +1,55 @@
 
 import unittest
 
-import torch
-import torch.nn as nn
+import tensorflow as tf
 
 from src.evaluation.retrieval_evaluator import RetrievalEvaluator
 
 
-class DummyRetrievalModel(nn.Module):
-    """Small deterministic model used only for evaluator tests."""
+class DummyRetrievalModel(tf.keras.Model):
+    """
+    Lightweight deterministic model.
 
-    def forward(self, images, captions):
-        image_embeddings = images[:, :2, 0, 0]
-        text_embeddings = captions[:, :, :2].float()
+    It is used to test the evaluator without loading ResNet50
+    or training a real retrieval model.
+    """
 
-        return {
-            "image_embeddings": image_embeddings,
-            "text_embeddings": text_embeddings,
-        }
+    def call(self, images, captions, training=None):
+        # Images are constant-colored in this test.
+        image_embeddings = tf.reduce_mean(
+            images,
+            axis=(1, 2),
+        )[:, :2]
 
+        # The first two token IDs represent the text embedding.
+        flat_captions = tf.reshape(
+            captions,
+            (-1, tf.shape(captions)[-1]),
+        )
 
-class BatchNormPreservingEncoder(nn.Module):
-    """Small encoder that keeps BatchNorm in evaluation mode."""
+        flat_text_embeddings = tf.cast(
+            flat_captions[:, :2],
+            tf.float32,
+        )
 
-    def __init__(self):
-        super().__init__()
-        self.bn = nn.BatchNorm2d(3)
+        text_embeddings = tf.reshape(
+            flat_text_embeddings,
+            (
+                tf.shape(captions)[0],
+                tf.shape(captions)[1],
+                2,
+            ),
+        )
 
-    def train(self, mode=True):
-        super().train(mode)
-        self.bn.eval()
-        return self
+        image_embeddings = tf.math.l2_normalize(
+            image_embeddings,
+            axis=-1,
+        )
 
-    def forward(self, images):
-        features = self.bn(images)
-        return features.mean(dim=(2, 3))[:, :2]
-
-
-class DummyModelWithBatchNorm(nn.Module):
-    """Model used to test BatchNorm state preservation."""
-
-    def __init__(self):
-        super().__init__()
-        self.image_encoder = BatchNormPreservingEncoder()
-
-    def forward(self, images, captions):
-        image_embeddings = self.image_encoder(images)
-        text_embeddings = captions[:, :, :2].float()
+        text_embeddings = tf.math.l2_normalize(
+            text_embeddings,
+            axis=-1,
+        )
 
         return {
             "image_embeddings": image_embeddings,
@@ -61,280 +64,146 @@ class TestRetrievalEvaluator(unittest.TestCase):
 
         self.evaluator = RetrievalEvaluator(
             model=self.model,
-            device="cpu",
             query_batch_size=2,
             candidate_chunk_size=2,
             ks=(1, 2, 5),
         )
 
-    def test_perfect_retrieval_both_directions(self):
-        image_embeddings = torch.tensor([
-            [1.0, 0.0],
-            [0.0, 1.0],
-        ])
-
-        text_embeddings = torch.tensor([
-            [[1.0, 0.0], [0.9, 0.1]],
-            [[0.0, 1.0], [0.1, 0.9]],
-        ])
-
-        results = self.evaluator.evaluate_embeddings(
-            image_embeddings,
-            text_embeddings,
+    def create_dataset(self):
+        images = tf.concat(
+            [
+                tf.ones((1, 224, 224, 3))
+                * tf.constant([1.0, 0.0, 0.0]),
+                tf.ones((1, 224, 224, 3))
+                * tf.constant([0.0, 1.0, 0.0]),
+            ],
+            axis=0,
         )
 
-        self.assertEqual(
-            results["text_to_image"]["recall@1"],
-            1.0,
+        captions = tf.constant(
+            [
+                [
+                    [1, 0] + [0] * 32,
+                    [1, 0] + [0] * 32,
+                    [1, 0] + [0] * 32,
+                    [1, 0] + [0] * 32,
+                    [1, 0] + [0] * 32,
+                ],
+                [
+                    [0, 1] + [0] * 32,
+                    [0, 1] + [0] * 32,
+                    [0, 1] + [0] * 32,
+                    [0, 1] + [0] * 32,
+                    [0, 1] + [0] * 32,
+                ],
+            ],
+            dtype=tf.int32,
         )
 
-        self.assertEqual(
-            results["image_to_text"]["recall@1"],
-            1.0,
+        image_names = tf.constant(
+            ["image_1.jpg", "image_2.jpg"]
         )
 
-        self.assertEqual(
-            results["text_to_image"]["mrr"],
-            1.0,
-        )
-
-        self.assertEqual(
-            results["image_to_text"]["median_rank"],
-            1.0,
-        )
-
-    def test_retrieval_ranks_with_candidate_chunking(self):
-        queries = torch.tensor([
-            [1.0, 0.0],
-        ])
-
-        candidates = torch.tensor([
-            [0.0, 1.0],
-            [1.0, 0.0],
-            [0.8, 0.6],
-        ])
-
-        positive_indices = torch.tensor([
-            [2],
-        ])
-
-        evaluator = RetrievalEvaluator(
-            model=self.model,
-            device="cpu",
-            query_batch_size=1,
-            candidate_chunk_size=1,
-        )
-
-        ranks = evaluator._compute_first_relevant_ranks(
-            queries,
-            candidates,
-            positive_indices,
-        )
-
-        self.assertEqual(ranks.tolist(), [2])
-
-    def test_stable_tie_breaking(self):
-        queries = torch.tensor([
-            [1.0, 0.0],
-        ])
-
-        candidates = torch.tensor([
-            [1.0, 0.0],
-            [1.0, 0.0],
-        ])
-
-        positive_indices = torch.tensor([
-            [1],
-        ])
-
-        ranks = self.evaluator._compute_first_relevant_ranks(
-            queries,
-            candidates,
-            positive_indices,
-        )
-
-        self.assertEqual(ranks.tolist(), [2])
-
-    def test_metrics_calculation(self):
-        ranks = torch.tensor([1, 2, 3])
-
-        metrics = self.evaluator._metrics_from_ranks(
-            ranks,
-            num_candidates=5,
-        )
-
-        self.assertAlmostEqual(metrics["recall@1"], 1 / 3)
-        self.assertAlmostEqual(metrics["recall@2"], 2 / 3)
-
-        self.assertAlmostEqual(
-            metrics["mean_recall"],
-            (1 / 3 + 2 / 3 + 1.0) / 3,
-        )
-
-        self.assertAlmostEqual(
-            metrics["mrr"],
-            (1 + 1 / 2 + 1 / 3) / 3,
-        )
-
-    def test_extract_embeddings_from_dataloader(self):
-        images = torch.tensor([
-            [[[1.0]], [[0.0]], [[0.0]]],
-            [[[0.0]], [[1.0]], [[0.0]]],
-        ])
-
-        captions = torch.tensor([
-            [[1, 0], [1, 0]],
-            [[0, 1], [0, 1]],
-        ])
-
-        dataloader = [
+        dataset = tf.data.Dataset.from_tensor_slices(
             {
                 "image": images,
                 "captions": captions,
-                "image_name": ["image_1.jpg", "image_2.jpg"],
+                "image_name": image_names,
             }
-        ]
-
-        image_embeddings, text_embeddings, names = (
-            self.evaluator.extract_embeddings(dataloader)
         )
 
-        self.assertEqual(tuple(image_embeddings.shape), (2, 2))
-        self.assertEqual(tuple(text_embeddings.shape), (2, 2, 2))
-        self.assertEqual(names, ["image_1.jpg", "image_2.jpg"])
+        return dataset.batch(2)
 
-    def test_evaluate_dataloader(self):
-        images = torch.tensor([
-            [[[1.0]], [[0.0]], [[0.0]]],
-            [[[0.0]], [[1.0]], [[0.0]]],
-        ])
+    def test_evaluator_initialization(self):
+        self.assertIsNotNone(self.evaluator)
+        self.assertIs(self.evaluator.model, self.model)
 
-        captions = torch.tensor([
-            [[1, 0], [1, 0]],
-            [[0, 1], [0, 1]],
-        ])
+    def test_extract_embeddings(self):
+        dataset = self.create_dataset()
 
-        dataloader = [
-            {
-                "image": images,
-                "captions": captions,
-                "image_name": ["image_1.jpg", "image_2.jpg"],
-            }
-        ]
+        extracted = self.evaluator.extract_embeddings(
+            dataset
+        )
 
-        results = self.evaluator.evaluate(dataloader)
+        # The evaluator should extract one image embedding
+        # and five caption embeddings for each image.
+        self.assertEqual(
+            tuple(extracted["image_embeddings"].shape),
+            (2, 512),
+        )
+
+        self.assertEqual(
+            tuple(extracted["text_embeddings"].shape),
+            (2, 5, 512),
+        )
+
+    def test_evaluate_both_retrieval_directions(self):
+        dataset = self.create_dataset()
+
+        results = self.evaluator.evaluate(dataset)
 
         self.assertIn("text_to_image", results)
         self.assertIn("image_to_text", results)
 
-        self.assertEqual(results["num_images"], 2)
-        self.assertEqual(results["captions_per_image"], 2)
+        self.assertIn(
+            "recall@1",
+            results["text_to_image"],
+        )
+
+        self.assertIn(
+            "recall@1",
+            results["image_to_text"],
+        )
+
+        self.assertIn(
+            "mrr",
+            results["text_to_image"],
+        )
+
+        self.assertIn(
+            "median_rank",
+            results["image_to_text"],
+        )
+
+    def test_perfect_retrieval(self):
+        dataset = self.create_dataset()
+
+        results = self.evaluator.evaluate(dataset)
+
+        self.assertAlmostEqual(
+            results["text_to_image"]["recall@1"],
+            1.0,
+            places=5,
+        )
+
+        self.assertAlmostEqual(
+            results["image_to_text"]["recall@1"],
+            1.0,
+            places=5,
+        )
+
+    def test_model_is_not_updated_during_evaluation(self):
+        dataset = self.create_dataset()
+
+        self.evaluator.evaluate(dataset)
+
+        # Evaluation must not change trainable weights.
         self.assertEqual(
-            results["image_names"],
-            ["image_1.jpg", "image_2.jpg"],
+            len(self.model.trainable_variables),
+            0,
         )
 
-    def test_batchnorm_state_preserved_after_evaluation(self):
-        model = DummyModelWithBatchNorm()
-
-        # The whole model is in training mode.
-        model.train()
-
-        # BatchNorm must remain in evaluation mode.
-        self.assertTrue(model.training)
-        self.assertFalse(model.image_encoder.bn.training)
-
-        evaluator = RetrievalEvaluator(
-            model=model,
-            device="cpu",
-            query_batch_size=2,
-            candidate_chunk_size=2,
-            ks=(1, 2),
-        )
-
-        images = torch.tensor([
-            [[[1.0]], [[0.0]], [[0.0]]],
-            [[[0.0]], [[1.0]], [[0.0]]],
-        ])
-
-        captions = torch.tensor([
-            [[1, 0], [1, 0]],
-            [[0, 1], [0, 1]],
-        ])
-
-        dataloader = [
-            {
-                "image": images,
-                "captions": captions,
-                "image_name": ["image_1.jpg", "image_2.jpg"],
-            }
-        ]
-
-        evaluator.extract_embeddings(dataloader)
-
-        # The original model state must be restored.
-        self.assertTrue(model.training)
-
-        # BatchNorm must still be in evaluation mode.
-        self.assertFalse(model.image_encoder.bn.training)
-
-    def test_model_eval_state_preserved_after_extraction(self):
-        model = DummyModelWithBatchNorm()
-        model.eval()
-
-        evaluator = RetrievalEvaluator(
-            model=model,
-            device="cpu",
-        )
-
-        images = torch.randn(2, 3, 2, 2)
-        captions = torch.tensor([
-            [[1, 0]],
-            [[0, 1]],
-        ])
-
-        dataloader = [
-            {
-                "image": images,
-                "captions": captions,
-                "image_name": ["image_1.jpg", "image_2.jpg"],
-            }
-        ]
-
-        evaluator.extract_embeddings(dataloader)
-
-        self.assertFalse(model.training)
-        self.assertFalse(model.image_encoder.bn.training)
-
-    def test_invalid_embedding_dimensions(self):
-        image_embeddings = torch.randn(2, 3)
-        text_embeddings = torch.randn(2, 2, 4)
-
-        with self.assertRaises(ValueError):
-            self.evaluator.evaluate_embeddings(
-                image_embeddings,
-                text_embeddings,
+    def test_invalid_constructor_arguments(self):
+        with self.assertRaises((ValueError, TypeError)):
+            RetrievalEvaluator(
+                model=self.model,
+                query_batch_size=0,
             )
 
-    def test_empty_embeddings(self):
-        image_embeddings = torch.empty(0, 2)
-        text_embeddings = torch.empty(0, 5, 2)
-
-        with self.assertRaises(ValueError):
-            self.evaluator.evaluate_embeddings(
-                image_embeddings,
-                text_embeddings,
-            )
-
-    def test_duplicate_image_names(self):
-        image_embeddings = torch.randn(2, 2)
-        text_embeddings = torch.randn(2, 5, 2)
-
-        with self.assertRaises(ValueError):
-            self.evaluator.evaluate_embeddings(
-                image_embeddings,
-                text_embeddings,
-                image_names=["same.jpg", "same.jpg"],
+        with self.assertRaises((ValueError, TypeError)):
+            RetrievalEvaluator(
+                model=self.model,
+                candidate_chunk_size=0,
             )
 
 

@@ -1,167 +1,159 @@
 
 from typing import Dict, Iterable
 
-import torch
+import tensorflow as tf
 
 
 def compute_retrieval_metrics(
-    similarity_matrix: torch.Tensor,
-    relevance_matrix: torch.Tensor,
+    similarity_matrix,
+    relevance_matrix,
     ks: Iterable[int] = (1, 5, 10),
 ) -> Dict[str, float]:
     """
-    Compute retrieval metrics for a similarity matrix.
+    Compute retrieval metrics using TensorFlow.
 
     Args:
-        similarity_matrix:
-            Tensor of shape [num_queries, num_candidates].
-            Higher scores indicate more similar items.
-
-        relevance_matrix:
-            Boolean or binary tensor with the same shape.
-            True indicates that a candidate is relevant to a query.
-            A query may have multiple relevant candidates.
-
-        ks:
-            Recall cutoffs, e.g. (1, 5, 10).
+        similarity_matrix: [num_queries, num_candidates].
+        relevance_matrix: Boolean/binary matrix with the same shape.
+        ks: Recall cutoffs.
 
     Returns:
-        Dictionary containing Recall@K, Mean Recall,
-        Median Rank, MRR, and number of queries.
+        Recall@K, Mean Recall, Median Rank, MRR,
+        number of queries and candidates.
     """
 
-    # 1. Validate input tensors
-    if not isinstance(similarity_matrix, torch.Tensor):
-        similarity_matrix = torch.as_tensor(similarity_matrix)
+    similarity_matrix = tf.convert_to_tensor(
+        similarity_matrix,
+        dtype=tf.float32,
+    )
+    relevance_matrix = tf.convert_to_tensor(relevance_matrix)
 
-    if not isinstance(relevance_matrix, torch.Tensor):
-        relevance_matrix = torch.as_tensor(relevance_matrix)
+    tf.debugging.assert_rank(similarity_matrix, 2)
+    tf.debugging.assert_rank(relevance_matrix, 2)
+    tf.debugging.assert_equal(
+        tf.shape(similarity_matrix),
+        tf.shape(relevance_matrix),
+    )
+    tf.debugging.assert_positive(tf.shape(similarity_matrix))
 
-    if similarity_matrix.ndim != 2:
-        raise ValueError(
-            "similarity_matrix must be a 2D tensor."
-        )
+    tf.debugging.assert_all_finite(
+        similarity_matrix,
+        "Similarity matrix contains NaN or infinite values.",
+    )
 
-    if relevance_matrix.ndim != 2:
-        raise ValueError(
-            "relevance_matrix must be a 2D tensor."
-        )
+    relevance_matrix = tf.cast(relevance_matrix, tf.bool)
 
-    if similarity_matrix.shape != relevance_matrix.shape:
-        raise ValueError(
-            "Similarity and relevance matrices must have "
-            "the same shape."
-        )
+    relevant_counts = tf.reduce_sum(
+        tf.cast(relevance_matrix, tf.int32),
+        axis=1,
+    )
 
-    num_queries, num_candidates = similarity_matrix.shape
+    tf.debugging.assert_positive(
+        relevant_counts,
+        message="Every query must have at least one relevant candidate.",
+    )
 
-    if num_queries == 0 or num_candidates == 0:
-        raise ValueError(
-            "Similarity matrix cannot be empty."
-        )
-
-    # 2. Validate similarity scores
-    similarity_matrix = similarity_matrix.detach().float()
-
-    if not torch.isfinite(similarity_matrix).all():
-        raise ValueError(
-            "Similarity matrix contains NaN or infinite values."
-        )
-
-    # 3. Validate relevance information
-    relevance_matrix = relevance_matrix.detach().bool()
-
-    relevant_per_query = relevance_matrix.sum(dim=1)
-
-    if (relevant_per_query == 0).any():
-        raise ValueError(
-            "Every query must have at least one relevant candidate."
-        )
-
-    # 4. Validate K values
     ks = tuple(ks)
 
     if not ks:
-        raise ValueError(
-            "At least one K value must be provided."
-        )
+        raise ValueError("At least one K value must be provided.")
 
     if any(
         not isinstance(k, int) or isinstance(k, bool) or k <= 0
         for k in ks
     ):
-        raise ValueError(
-            "All K values must be positive integers."
-        )
+        raise ValueError("All K values must be positive integers.")
 
     if len(set(ks)) != len(ks):
-        raise ValueError(
-            "K values must be unique."
-        )
+        raise ValueError("K values must be unique.")
 
-    # 5. Rank candidates for every query
-    sorted_indices = torch.argsort(
+    num_queries = int(tf.shape(similarity_matrix)[0].numpy())
+    num_candidates = int(tf.shape(similarity_matrix)[1].numpy())
+
+    sorted_indices = tf.argsort(
         similarity_matrix,
-        dim=1,
-        descending=True,
+        axis=1,
+        direction="DESCENDING",
         stable=True,
     )
 
-    sorted_relevance = torch.gather(
+    sorted_relevance = tf.gather(
         relevance_matrix,
-        dim=1,
-        index=sorted_indices,
+        sorted_indices,
+        axis=1,
+        batch_dims=1,
     )
 
-    # 6. Find the rank of the first relevant candidate
-    positions = torch.arange(
+    positions = tf.range(
         1,
         num_candidates + 1,
-        device=similarity_matrix.device,
-    ).unsqueeze(0)
+        dtype=tf.int32,
+    )[tf.newaxis, :]
 
-    relevant_positions = torch.where(
+    relevant_positions = tf.where(
         sorted_relevance,
-        positions,
+        tf.broadcast_to(
+            positions,
+            tf.shape(sorted_relevance),
+        ),
         num_candidates + 1,
     )
 
-    first_relevant_ranks = relevant_positions.min(dim=1).values
+    first_relevant_ranks = tf.reduce_min(
+        relevant_positions,
+        axis=1,
+    )
 
-    # 7. Calculate Recall@K
     results = {}
-
     recall_values = []
 
     for k in ks:
         effective_k = min(k, num_candidates)
 
-        hits = (
-            first_relevant_ranks <= effective_k
-        ).float()
+        recall = tf.reduce_mean(
+            tf.cast(
+                first_relevant_ranks <= effective_k,
+                tf.float32,
+            )
+        )
 
-        recall_at_k = hits.mean().item()
+        recall_value = float(recall.numpy())
 
-        results[f"recall@{k}"] = recall_at_k
-        recall_values.append(recall_at_k)
+        results[f"recall@{k}"] = recall_value
+        recall_values.append(recall_value)
 
-    # 8. Mean Recall
-    results["mean_recall"] = (
-        sum(recall_values) / len(recall_values)
+    results["mean_recall"] = sum(recall_values) / len(recall_values)
+
+    results["median_rank"] = float(
+        tfp_median(first_relevant_ranks)
     )
 
-    # 9. Median Rank
-    results["median_rank"] = (
-        first_relevant_ranks.float().median().item()
+    reciprocal_ranks = tf.math.reciprocal(
+        tf.cast(first_relevant_ranks, tf.float32)
     )
 
-    # 10. Mean Reciprocal Rank
-    reciprocal_ranks = 1.0 / first_relevant_ranks.float()
+    results["mrr"] = float(
+        tf.reduce_mean(reciprocal_ranks).numpy()
+    )
 
-    results["mrr"] = reciprocal_ranks.mean().item()
-
-    # 11. Additional information
     results["num_queries"] = float(num_queries)
     results["num_candidates"] = float(num_candidates)
 
     return results
+
+
+def tfp_median(values):
+    """Calculate the statistical median without TensorFlow Probability."""
+
+    sorted_values = tf.sort(values)
+    count = tf.shape(sorted_values)[0]
+
+    middle = count // 2
+
+    if int(count.numpy()) % 2 == 1:
+        return tf.cast(sorted_values[middle], tf.float32).numpy()
+
+    lower = tf.cast(sorted_values[middle - 1], tf.float32)
+    upper = tf.cast(sorted_values[middle], tf.float32)
+
+    return float(((lower + upper) / 2.0).numpy())

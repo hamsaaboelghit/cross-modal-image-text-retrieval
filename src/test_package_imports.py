@@ -1,46 +1,109 @@
 
-import sys
+import importlib
+import unittest
 from pathlib import Path
+import sys
 
-# Add project root to Python path
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(PROJECT_ROOT))
 
-print("=" * 55)
-print("PACKAGE IMPORT TEST")
-print("=" * 55)
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-# 1. Package imports
-import src
-import src.data
-import src.models
-import src.training
-import src.evaluation
-import src.retrieval
 
-print("Package imports: PASS")
+MODULES = [
+    # Packages
+    "src",
+    "src.data",
+    "src.models",
+    "src.training",
+    "src.evaluation",
+    "src.retrieval",
 
-# 2. Data module
-from src.data.flickr30k_dataset import Flickr30kDataset
+    # Data
+    "src.data.flickr30k_dataset",
 
-print("Dataset import: PASS")
+    # Models
+    "src.models.attention",
+    "src.models.image_encoder",
+    "src.models.text_encoder",
+    "src.models.projection_head",
+    "src.models.cross_modal_attention",
+    "src.models.full_model",
+    "src.models.baseline_model",
 
-# 3. Model modules
-from src.models.attention import AdditiveAttention
-from src.models.image_encoder import ImageEncoder
-from src.models.text_encoder import TextEncoder
-from src.models.projection_head import CrossModalProjection
-from src.models.full_model import CrossModalRetrievalModel
+    # Training
+    "src.training.contrastive_loss",
+    "src.training.triplet_loss",
+    "src.training.margin_loss",
+    "src.training.train_config",
+    "src.training.optimizer",
+    "src.training.trainer",
+    "src.training.evaluator",
+    "src.training.checkpoint_manager",
 
-print("Model imports: PASS")
+    # Evaluation
+    "src.evaluation.retrieval_metrics",
+    "src.evaluation.retrieval_evaluator",
+    "src.evaluation.evaluation_runner",
 
-# 4. Loss modules
-from src.training.contrastive_loss import MultiPositiveInfoNCELoss
-from src.training.triplet_loss import TripletContrastiveLoss
-from src.training.margin_loss import MarginBasedContrastiveLoss
+    # Retrieval
+    "src.retrieval.retrieval_engine",
+]
 
-print("Loss imports: PASS")
 
-print("=" * 55)
-print("ALL PACKAGE IMPORT TESTS PASSED!")
-print("=" * 55)
+class TestPackageImports(unittest.TestCase):
+
+    def test_all_modules_import(self):
+        failed_modules = []
+
+        for module_name in MODULES:
+            try:
+                importlib.import_module(module_name)
+            except Exception as error:
+                failed_modules.append(
+                    (module_name, repr(error))
+                )
+
+        if failed_modules:
+            details = "\n".join(
+                f"{name}: {error}"
+                for name, error in failed_modules
+            )
+
+            self.fail(
+                "Some project modules could not be imported:\n"
+                + details
+            )
+
+    def test_tensorflow_is_available(self):
+        import tensorflow as tf
+
+        self.assertTrue(
+            tf.__version__.startswith("2.")
+        )
+
+    def test_core_model_classes(self):
+        from src.models.full_model import CrossModalRetrievalModel
+        from src.models.baseline_model import BaselineRetrievalModel
+
+        self.assertTrue(
+            callable(CrossModalRetrievalModel)
+        )
+
+        self.assertTrue(
+            callable(BaselineRetrievalModel)
+        )
+
+    def test_core_loss_classes(self):
+        from src.training.contrastive_loss import MultiPositiveInfoNCELoss
+        from src.training.triplet_loss import TripletContrastiveLoss
+        from src.training.margin_loss import MarginBasedContrastiveLoss
+
+        self.assertTrue(callable(MultiPositiveInfoNCELoss))
+        self.assertTrue(callable(TripletContrastiveLoss))
+        self.assertTrue(callable(MarginBasedContrastiveLoss))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

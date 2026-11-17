@@ -1,66 +1,51 @@
 
-from typing import Dict, Iterable, Optional
+from typing import Iterable, Optional
 
-import torch
-import torch.nn.functional as F
+import tensorflow as tf
 
 
 class RetrievalEvaluator:
     """
-    Memory-efficient bidirectional image-text retrieval evaluator.
-
-    Supports:
-        1. Text-to-Image retrieval.
-        2. Image-to-Text retrieval.
-
-    Uses chunked similarity computation to avoid creating
-    extremely large similarity matrices.
+    TensorFlow bidirectional image-text retrieval evaluator.
 
     Expected model output:
-        {
-            "image_embeddings": [B, D],
-            "text_embeddings": [B, C, D]
-        }
+        image_embeddings: [B, D]
+        text_embeddings:  [B, C, D]
+
+    Supports:
+        - Text-to-Image retrieval
+        - Image-to-Text retrieval
+        - Chunked similarity computation
     """
 
     def __init__(
         self,
         model,
-        device: Optional[str] = None,
         query_batch_size: int = 32,
         candidate_chunk_size: int = 8192,
         ks: Iterable[int] = (1, 5, 10),
     ):
+        if (
+            not isinstance(query_batch_size, int)
+            or isinstance(query_batch_size, bool)
+            or query_batch_size <= 0
+        ):
+            raise ValueError(
+                "query_batch_size must be a positive integer."
+            )
 
-        if not isinstance(query_batch_size, int) or isinstance(
-            query_batch_size, bool
-        ) or query_batch_size <= 0:
-            raise ValueError("query_batch_size must be a positive integer.")
-
-        if not isinstance(candidate_chunk_size, int) or isinstance(
-            candidate_chunk_size, bool
-        ) or candidate_chunk_size <= 0:
+        if (
+            not isinstance(candidate_chunk_size, int)
+            or isinstance(candidate_chunk_size, bool)
+            or candidate_chunk_size <= 0
+        ):
             raise ValueError(
                 "candidate_chunk_size must be a positive integer."
             )
 
         self.model = model
-
-        try:
-            model_device = next(model.parameters()).device
-        except StopIteration:
-            model_device = torch.device("cpu")
-
-        self.device = torch.device(
-            device if device is not None else model_device
-        )
-
-        if self.device.type == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("CUDA was requested but is not available.")
-
         self.query_batch_size = query_batch_size
         self.candidate_chunk_size = candidate_chunk_size
-
         self.ks = tuple(ks)
 
         if not self.ks:
@@ -75,291 +60,274 @@ class RetrievalEvaluator:
         if len(set(self.ks)) != len(self.ks):
             raise ValueError("K values must be unique.")
 
-    @torch.inference_mode()
-    def extract_embeddings(self, dataloader):
+    def extract_embeddings(self, dataset):
         """
-        Extract embeddings from all batches.
+        Extract normalized embeddings from a tf.data.Dataset.
 
-        Returns:
-            image_embeddings: [N, D], CPU tensor
-            text_embeddings: [N, C, D], CPU tensor
-            image_names: list[str]
+        Each batch must contain:
+            image: [B, H, W, 3]
+            captions: [B, C, L]
+            image_name: [B]
         """
-
-        was_training = self.model.training
-
-        self.model.to(self.device)
-        self.model.eval()
 
         all_image_embeddings = []
         all_text_embeddings = []
         all_image_names = []
 
-        try:
-            for batch in dataloader:
-
-                if not isinstance(batch, dict):
-                    raise TypeError(
-                        "Each DataLoader batch must be a dictionary."
-                    )
-
-                required_keys = {"image", "captions", "image_name"}
-
-                if not required_keys.issubset(batch):
-                    raise KeyError(
-                        f"Batch must contain: {required_keys}"
-                    )
-
-                images = batch["image"].to(
-                    self.device,
-                    non_blocking=True,
+        for batch_index, batch in enumerate(dataset, start=1):
+            if not isinstance(batch, dict):
+                raise TypeError(
+                    "Each dataset batch must be a dictionary."
                 )
 
-                captions = batch["captions"].to(
-                    self.device,
-                    non_blocking=True,
+            required_keys = {"image", "captions", "image_name"}
+
+            if not required_keys.issubset(batch):
+                raise KeyError(
+                    f"Batch must contain: {required_keys}"
                 )
 
-                if images.ndim != 4:
-                    raise ValueError(
-                        "Batch images must have shape [B, 3, H, W]."
-                    )
+            images = tf.convert_to_tensor(
+                batch["image"],
+                dtype=tf.float32,
+            )
 
-                if captions.ndim != 3:
-                    raise ValueError(
-                        "Batch captions must have shape [B, C, L]."
-                    )
+            captions = tf.convert_to_tensor(
+                batch["captions"],
+                dtype=tf.int32,
+            )
 
-                output = self.model(
-                    images=images,
-                    captions=captions,
+            tf.debugging.assert_rank(images, 4)
+            tf.debugging.assert_rank(captions, 3)
+
+            outputs = self.model(
+                images,
+                captions,
+                training=False,
+            )
+
+            if not isinstance(outputs, dict):
+                raise TypeError("Model output must be a dictionary.")
+
+            if "image_embeddings" not in outputs:
+                raise KeyError(
+                    "Model output is missing image_embeddings."
                 )
 
-                if not isinstance(output, dict):
-                    raise TypeError("Model output must be a dictionary.")
-
-                if "image_embeddings" not in output:
-                    raise KeyError(
-                        "Model output is missing image_embeddings."
-                    )
-
-                if "text_embeddings" not in output:
-                    raise KeyError(
-                        "Model output is missing text_embeddings."
-                    )
-
-                image_embeddings = output["image_embeddings"]
-                text_embeddings = output["text_embeddings"]
-
-                if image_embeddings.ndim != 2:
-                    raise ValueError(
-                        "Image embeddings must have shape [B, D]."
-                    )
-
-                if text_embeddings.ndim != 3:
-                    raise ValueError(
-                        "Text embeddings must have shape [B, C, D]."
-                    )
-
-                batch_size = images.size(0)
-
-                if image_embeddings.size(0) != batch_size:
-                    raise ValueError(
-                        "Image embedding batch size is incorrect."
-                    )
-
-                if text_embeddings.size(0) != batch_size:
-                    raise ValueError(
-                        "Text embedding batch size is incorrect."
-                    )
-
-                if text_embeddings.size(1) != captions.size(1):
-                    raise ValueError(
-                        "Number of text embeddings does not match "
-                        "number of captions."
-                    )
-
-                if image_embeddings.size(1) != text_embeddings.size(2):
-                    raise ValueError(
-                        "Image and text embedding dimensions must match."
-                    )
-
-                if not torch.isfinite(image_embeddings).all():
-                    raise ValueError(
-                        "Image embeddings contain invalid values."
-                    )
-
-                if not torch.isfinite(text_embeddings).all():
-                    raise ValueError(
-                        "Text embeddings contain invalid values."
-                    )
-
-                names = batch["image_name"]
-
-                if isinstance(names, str):
-                    names = [names]
-                else:
-                    names = list(names)
-
-                if len(names) != batch_size:
-                    raise ValueError(
-                        "Number of image names does not match batch size."
-                    )
-
-                all_image_embeddings.append(
-                    image_embeddings.detach().float().cpu()
+            if "text_embeddings" not in outputs:
+                raise KeyError(
+                    "Model output is missing text_embeddings."
                 )
 
-                all_text_embeddings.append(
-                    text_embeddings.detach().float().cpu()
+            image_embeddings = tf.cast(
+                outputs["image_embeddings"],
+                tf.float32,
+            )
+
+            text_embeddings = tf.cast(
+                outputs["text_embeddings"],
+                tf.float32,
+            )
+
+            tf.debugging.assert_rank(image_embeddings, 2)
+            tf.debugging.assert_rank(text_embeddings, 3)
+
+            tf.debugging.assert_equal(
+                tf.shape(image_embeddings)[0],
+                tf.shape(images)[0],
+            )
+
+            tf.debugging.assert_equal(
+                tf.shape(text_embeddings)[0],
+                tf.shape(images)[0],
+            )
+
+            tf.debugging.assert_equal(
+                tf.shape(text_embeddings)[1],
+                tf.shape(captions)[1],
+            )
+
+            tf.debugging.assert_equal(
+                tf.shape(image_embeddings)[1],
+                tf.shape(text_embeddings)[2],
+            )
+
+            tf.debugging.assert_all_finite(
+                image_embeddings,
+                "Image embeddings contain invalid values.",
+            )
+
+            tf.debugging.assert_all_finite(
+                text_embeddings,
+                "Text embeddings contain invalid values.",
+            )
+
+            image_embeddings = tf.math.l2_normalize(
+                image_embeddings,
+                axis=-1,
+            )
+
+            text_embeddings = tf.math.l2_normalize(
+                text_embeddings,
+                axis=-1,
+            )
+
+            all_image_embeddings.append(image_embeddings)
+            all_text_embeddings.append(text_embeddings)
+
+            names = batch["image_name"].numpy().tolist()
+
+            names = [
+                name.decode("utf-8") if isinstance(name, bytes)
+                else str(name)
+                for name in names
+            ]
+
+            if len(names) != int(tf.shape(images)[0].numpy()):
+                raise ValueError(
+                    "Image names count does not match batch size."
                 )
 
-                all_image_names.extend(names)
+            all_image_names.extend(names)
 
-        finally:
-            self.model.train(was_training)
+            if batch_index % 50 == 0:
+                print(
+                    f"Extracted batches: {batch_index} "
+                    f"| Images: {len(all_image_names)}"
+                )
 
         if not all_image_embeddings:
-            raise ValueError("DataLoader produced no batches.")
-
-        image_embeddings = torch.cat(
-            all_image_embeddings,
-            dim=0,
-        )
-
-        text_embeddings = torch.cat(
-            all_text_embeddings,
-            dim=0,
-        )
+            raise ValueError("Dataset produced no batches.")
 
         if len(set(all_image_names)) != len(all_image_names):
             raise ValueError(
                 "Duplicate image names detected in evaluation data."
             )
 
+        image_embeddings = tf.concat(
+            all_image_embeddings,
+            axis=0,
+        )
+
+        text_embeddings = tf.concat(
+            all_text_embeddings,
+            axis=0,
+        )
+
         return (
-            F.normalize(image_embeddings, p=2, dim=-1),
-            F.normalize(text_embeddings, p=2, dim=-1),
+            image_embeddings,
+            text_embeddings,
             all_image_names,
         )
 
-    @torch.inference_mode()
     def _compute_first_relevant_ranks(
         self,
-        query_embeddings: torch.Tensor,
-        candidate_embeddings: torch.Tensor,
-        positive_indices: torch.Tensor,
+        query_embeddings,
+        candidate_embeddings,
+        positive_indices,
     ):
         """
-        Compute the exact rank of the first relevant candidate.
+        Compute exact 1-based rank of the highest-scoring positive.
 
-        Similarities are calculated in chunks over candidates.
-
-        Ties follow stable descending sorting:
-        candidates with equal scores are ordered by their original index.
-
-        Args:
-            query_embeddings: [Q, D], CPU tensor.
-            candidate_embeddings: [M, D], CPU tensor.
-            positive_indices: [Q, P], CPU long tensor.
-
-        Returns:
-            first relevant ranks: [Q], CPU long tensor.
+        Similarities are calculated in candidate chunks to reduce memory.
+        Ties are resolved by original candidate index.
         """
 
-        if query_embeddings.ndim != 2:
-            raise ValueError("Query embeddings must be 2D.")
-
-        if candidate_embeddings.ndim != 2:
-            raise ValueError("Candidate embeddings must be 2D.")
-
-        if positive_indices.ndim != 2:
-            raise ValueError("Positive indices must be 2D.")
-
-        if query_embeddings.size(0) != positive_indices.size(0):
-            raise ValueError(
-                "Query count and positive-index count must match."
-            )
-
-        if query_embeddings.size(1) != candidate_embeddings.size(1):
-            raise ValueError(
-                "Query and candidate dimensions must match."
-            )
-
-        num_candidates = candidate_embeddings.size(0)
-
-        if num_candidates == 0:
-            raise ValueError("Candidate gallery cannot be empty.")
-
-        if positive_indices.size(1) == 0:
-            raise ValueError("Every query must have a positive candidate.")
-
-        if (
-            positive_indices.min().item() < 0
-            or positive_indices.max().item() >= num_candidates
-        ):
-            raise ValueError("Positive candidate index is out of range.")
-
-        query_embeddings = F.normalize(
-            query_embeddings.float(),
-            p=2,
-            dim=-1,
+        query_embeddings = tf.math.l2_normalize(
+            tf.cast(query_embeddings, tf.float32),
+            axis=-1,
         )
 
-        candidate_embeddings = F.normalize(
-            candidate_embeddings.float(),
-            p=2,
-            dim=-1,
+        candidate_embeddings = tf.math.l2_normalize(
+            tf.cast(candidate_embeddings, tf.float32),
+            axis=-1,
+        )
+
+        positive_indices = tf.convert_to_tensor(
+            positive_indices,
+            dtype=tf.int32,
+        )
+
+        tf.debugging.assert_rank(query_embeddings, 2)
+        tf.debugging.assert_rank(candidate_embeddings, 2)
+        tf.debugging.assert_rank(positive_indices, 2)
+
+        num_queries = int(
+            tf.shape(query_embeddings)[0].numpy()
+        )
+        num_candidates = int(
+            tf.shape(candidate_embeddings)[0].numpy()
+        )
+
+        tf.debugging.assert_positive(num_queries)
+        tf.debugging.assert_positive(num_candidates)
+
+        tf.debugging.assert_equal(
+            tf.shape(query_embeddings)[1],
+            tf.shape(candidate_embeddings)[1],
+        )
+
+        tf.debugging.assert_equal(
+            tf.shape(positive_indices)[0],
+            num_queries,
+        )
+
+        tf.debugging.assert_positive(
+            tf.shape(positive_indices)[1],
+            message="Every query must have at least one positive.",
+        )
+
+        tf.debugging.assert_greater_equal(positive_indices, 0)
+        tf.debugging.assert_less(
+            positive_indices,
+            num_candidates,
         )
 
         all_ranks = []
 
         for query_start in range(
             0,
-            query_embeddings.size(0),
+            num_queries,
             self.query_batch_size,
         ):
-
             query_end = min(
                 query_start + self.query_batch_size,
-                query_embeddings.size(0),
+                num_queries,
             )
 
-            queries = query_embeddings[query_start:query_end].to(
-                self.device
+            queries = query_embeddings[query_start:query_end]
+            positive_batch = positive_indices[query_start:query_end]
+
+            positive_embeddings = tf.gather(
+                candidate_embeddings,
+                positive_batch,
             )
 
-            positive_batch = positive_indices[
-                query_start:query_end
-            ]
-
-            # Calculate similarities with all positive candidates.
-            positive_embeddings = candidate_embeddings[
-                positive_batch
-            ].to(self.device)
-
-            positive_scores = (
-                queries.unsqueeze(1) * positive_embeddings
-            ).sum(dim=-1)
-
-            # Select the highest-scoring positive.
-            # argmax selects the first positive in case of a tie.
-            best_positive_scores, best_positive_positions = (
-                positive_scores.max(dim=1)
+            positive_scores = tf.reduce_sum(
+                queries[:, tf.newaxis, :] * positive_embeddings,
+                axis=-1,
             )
 
-            best_positive_indices = positive_batch.to(
-                self.device
-            ).gather(
-                1,
-                best_positive_positions.unsqueeze(1),
-            ).squeeze(1)
+            best_positive_positions = tf.argmax(
+                positive_scores,
+                axis=1,
+                output_type=tf.int32,
+            )
 
-            # Number of candidates ranked before the best positive.
-            ranks = torch.ones(
-                queries.size(0),
-                dtype=torch.long,
-                device=self.device,
+            best_positive_scores = tf.reduce_max(
+                positive_scores,
+                axis=1,
+            )
+
+            best_positive_indices = tf.gather(
+                positive_batch,
+                best_positive_positions,
+                batch_dims=1,
+            )
+
+            ranks = tf.ones(
+                (query_end - query_start,),
+                dtype=tf.int32,
             )
 
             for candidate_start in range(
@@ -367,7 +335,6 @@ class RetrievalEvaluator:
                 num_candidates,
                 self.candidate_chunk_size,
             ):
-
                 candidate_end = min(
                     candidate_start + self.candidate_chunk_size,
                     num_candidates,
@@ -375,116 +342,140 @@ class RetrievalEvaluator:
 
                 candidates = candidate_embeddings[
                     candidate_start:candidate_end
-                ].to(self.device)
+                ]
 
-                similarities = queries @ candidates.T
-
-                # Higher similarity always ranks first.
-                greater_scores = (
-                    similarities > best_positive_scores.unsqueeze(1)
+                similarities = tf.matmul(
+                    queries,
+                    candidates,
+                    transpose_b=True,
                 )
 
-                # Equal scores rank first only if their original
-                # candidate index is smaller.
-                candidate_indices = torch.arange(
+                candidate_indices = tf.range(
                     candidate_start,
                     candidate_end,
-                    device=self.device,
+                    dtype=tf.int32,
                 )
 
-                equal_scores_before = (
-                    (similarities == best_positive_scores.unsqueeze(1))
-                    &
-                    (
-                        candidate_indices.unsqueeze(0)
-                        < best_positive_indices.unsqueeze(1)
-                    )
+                greater_scores = (
+                    similarities > best_positive_scores[:, tf.newaxis]
                 )
 
-                ranks += (
-                    greater_scores | equal_scores_before
-                ).sum(dim=1)
+                equal_scores_before = tf.logical_and(
+                    tf.equal(
+                        similarities,
+                        best_positive_scores[:, tf.newaxis],
+                    ),
+                    candidate_indices[tf.newaxis, :]
+                    < best_positive_indices[:, tf.newaxis],
+                )
 
-            all_ranks.append(ranks.cpu())
+                ranked_before = tf.logical_or(
+                    greater_scores,
+                    equal_scores_before,
+                )
 
-        return torch.cat(all_ranks, dim=0)
+                ranks += tf.reduce_sum(
+                    tf.cast(ranked_before, tf.int32),
+                    axis=1,
+                )
+
+            all_ranks.append(ranks)
+
+        return tf.concat(all_ranks, axis=0)
 
     def _metrics_from_ranks(self, ranks, num_candidates):
-        """
-        Calculate retrieval metrics from first-positive ranks.
-        """
-
-        if ranks.ndim != 1 or ranks.numel() == 0:
-            raise ValueError("Ranks must be a non-empty 1D tensor.")
-
-        ranks = ranks.float()
+        ranks = tf.cast(ranks, tf.float32)
 
         results = {}
         recall_values = []
 
         for k in self.ks:
-
             effective_k = min(k, num_candidates)
 
-            recall = (
-                (ranks <= effective_k).float().mean().item()
+            recall = tf.reduce_mean(
+                tf.cast(ranks <= effective_k, tf.float32)
             )
 
-            results[f"recall@{k}"] = recall
-            recall_values.append(recall)
+            recall_value = float(recall.numpy())
+
+            results[f"recall@{k}"] = recall_value
+            recall_values.append(recall_value)
 
         results["mean_recall"] = (
             sum(recall_values) / len(recall_values)
         )
 
-        results["median_rank"] = ranks.median().item()
+        sorted_ranks = tf.sort(ranks)
+        count = int(tf.shape(sorted_ranks)[0].numpy())
+        middle = count // 2
 
-        results["mrr"] = (1.0 / ranks).mean().item()
+        if count % 2:
+            median_rank = sorted_ranks[middle]
+        else:
+            median_rank = (
+                sorted_ranks[middle - 1] + sorted_ranks[middle]
+            ) / 2.0
 
-        results["num_queries"] = float(ranks.numel())
+        results["median_rank"] = float(median_rank.numpy())
+
+        results["mrr"] = float(
+            tf.reduce_mean(tf.math.reciprocal(ranks)).numpy()
+        )
+
+        results["num_queries"] = float(count)
         results["num_candidates"] = float(num_candidates)
 
         return results
 
-    @torch.inference_mode()
     def evaluate_embeddings(
         self,
-        image_embeddings: torch.Tensor,
-        text_embeddings: torch.Tensor,
+        image_embeddings,
+        text_embeddings,
         image_names=None,
     ):
         """
-        Evaluate already extracted embeddings in both directions.
+        Evaluate both retrieval directions.
 
-        Args:
-            image_embeddings: [N, D]
-            text_embeddings: [N, C, D]
+        Text-to-Image:
+            Every caption is relevant to its source image.
 
-        Returns:
-            Dictionary with Text-to-Image and Image-to-Text metrics.
+        Image-to-Text:
+            Every image is relevant to all its own captions.
         """
 
-        if image_embeddings.ndim != 2:
-            raise ValueError("Image embeddings must be 2D.")
+        image_embeddings = tf.convert_to_tensor(
+            image_embeddings,
+            dtype=tf.float32,
+        )
 
-        if text_embeddings.ndim != 3:
-            raise ValueError("Text embeddings must be 3D.")
+        text_embeddings = tf.convert_to_tensor(
+            text_embeddings,
+            dtype=tf.float32,
+        )
 
-        num_images = image_embeddings.size(0)
-        num_captions = text_embeddings.size(1)
+        tf.debugging.assert_rank(image_embeddings, 2)
+        tf.debugging.assert_rank(text_embeddings, 3)
 
-        if num_images == 0 or num_captions == 0:
-            raise ValueError("Evaluation embeddings cannot be empty.")
+        num_images = int(
+            tf.shape(image_embeddings)[0].numpy()
+        )
 
-        if text_embeddings.size(0) != num_images:
-            raise ValueError(
-                "Image and text embedding counts must match."
-            )
+        captions_per_image = int(
+            tf.shape(text_embeddings)[1].numpy()
+        )
 
-        if image_embeddings.size(1) != text_embeddings.size(2):
-            raise ValueError(
-                "Image and text embedding dimensions must match."
-            )
+        tf.debugging.assert_positive(num_images)
+        tf.debugging.assert_positive(captions_per_image)
+
+        tf.debugging.assert_equal(
+            tf.shape(text_embeddings)[0],
+            num_images,
+        )
+
+        tf.debugging.assert_equal(
+            tf.shape(image_embeddings)[1],
+            tf.shape(text_embeddings)[2],
+        )
 
         if image_names is not None:
             if len(image_names) != num_images:
@@ -495,34 +486,32 @@ class RetrievalEvaluator:
             if len(set(image_names)) != len(image_names):
                 raise ValueError("Duplicate image names detected.")
 
-        image_embeddings = F.normalize(
-            image_embeddings.detach().float().cpu(),
-            p=2,
-            dim=-1,
+        image_embeddings = tf.math.l2_normalize(
+            image_embeddings,
+            axis=-1,
         )
 
-        text_embeddings = F.normalize(
-            text_embeddings.detach().float().cpu(),
-            p=2,
-            dim=-1,
+        text_embeddings = tf.math.l2_normalize(
+            text_embeddings,
+            axis=-1,
         )
 
-        flat_text_embeddings = text_embeddings.reshape(
-            num_images * num_captions,
-            -1,
+        flat_text_embeddings = tf.reshape(
+            text_embeddings,
+            (
+                num_images * captions_per_image,
+                -1,
+            ),
         )
 
-        # Text-to-Image:
-        # Each caption is relevant to its source image.
-        text_queries = flat_text_embeddings
-
-        text_positive_indices = torch.arange(
-            num_images,
-            dtype=torch.long,
-        ).repeat_interleave(num_captions).unsqueeze(1)
+        # Text-to-Image: each caption has one positive image.
+        text_positive_indices = tf.repeat(
+            tf.range(num_images, dtype=tf.int32),
+            repeats=captions_per_image,
+        )[:, tf.newaxis]
 
         text_to_image_ranks = self._compute_first_relevant_ranks(
-            query_embeddings=text_queries,
+            query_embeddings=flat_text_embeddings,
             candidate_embeddings=image_embeddings,
             positive_indices=text_positive_indices,
         )
@@ -532,46 +521,45 @@ class RetrievalEvaluator:
             num_images,
         )
 
-        # Image-to-Text:
-        # Each image is relevant to all its own captions.
-        image_queries = image_embeddings
-
+        # Image-to-Text: each image has C positive captions.
         image_positive_indices = (
-            torch.arange(num_images, dtype=torch.long).unsqueeze(1)
-            * num_captions
+            tf.range(num_images, dtype=tf.int32)[:, tf.newaxis]
+            * captions_per_image
             +
-            torch.arange(num_captions, dtype=torch.long).unsqueeze(0)
+            tf.range(captions_per_image, dtype=tf.int32)[tf.newaxis, :]
         )
 
         image_to_text_ranks = self._compute_first_relevant_ranks(
-            query_embeddings=image_queries,
+            query_embeddings=image_embeddings,
             candidate_embeddings=flat_text_embeddings,
             positive_indices=image_positive_indices,
         )
 
         image_to_text_metrics = self._metrics_from_ranks(
             image_to_text_ranks,
-            num_images * num_captions,
+            num_images * captions_per_image,
         )
 
         return {
             "text_to_image": text_to_image_metrics,
             "image_to_text": image_to_text_metrics,
             "num_images": num_images,
-            "captions_per_image": num_captions,
-            "embedding_dim": image_embeddings.size(1),
+            "captions_per_image": captions_per_image,
+            "embedding_dim": int(
+                tf.shape(image_embeddings)[1].numpy()
+            ),
         }
 
-    def evaluate(self, dataloader):
+    def evaluate(self, dataset):
         """
-        Extract embeddings from a DataLoader and evaluate retrieval.
+        Extract embeddings and evaluate retrieval from tf.data.Dataset.
         """
 
         (
             image_embeddings,
             text_embeddings,
             image_names,
-        ) = self.extract_embeddings(dataloader)
+        ) = self.extract_embeddings(dataset)
 
         results = self.evaluate_embeddings(
             image_embeddings=image_embeddings,
@@ -582,3 +570,69 @@ class RetrievalEvaluator:
         results["image_names"] = image_names
 
         return results
+
+
+def _run_evaluator_tests():
+    print("TensorFlow Retrieval Evaluator Tests")
+    print("-" * 55)
+
+    tf.random.set_seed(42)
+
+    num_images = 12
+    captions_per_image = 5
+    embedding_dim = 32
+
+    image_embeddings = tf.math.l2_normalize(
+        tf.random.normal((num_images, embedding_dim)),
+        axis=-1,
+    )
+
+    text_embeddings = tf.math.l2_normalize(
+        tf.random.normal(
+            (num_images, captions_per_image, embedding_dim)
+        ),
+        axis=-1,
+    )
+
+    evaluator = RetrievalEvaluator(
+        model=None,
+        query_batch_size=4,
+        candidate_chunk_size=7,
+        ks=(1, 5, 10),
+    )
+
+    results = evaluator.evaluate_embeddings(
+        image_embeddings,
+        text_embeddings,
+        image_names=[
+            f"image_{index}.jpg"
+            for index in range(num_images)
+        ],
+    )
+
+    assert "text_to_image" in results
+    assert "image_to_text" in results
+
+    for direction in ("text_to_image", "image_to_text"):
+        metrics = results[direction]
+
+        assert "recall@1" in metrics
+        assert "recall@5" in metrics
+        assert "recall@10" in metrics
+        assert "mean_recall" in metrics
+        assert "median_rank" in metrics
+        assert "mrr" in metrics
+
+        assert 0.0 <= metrics["mrr"] <= 1.0
+
+    print("Text-to-Image metrics: PASS")
+    print("Image-to-Text metrics: PASS")
+    print("Chunked rank calculation: PASS")
+    print("Metric ranges: PASS")
+
+    print("-" * 55)
+    print("All Retrieval Evaluator tests passed!")
+
+
+if __name__ == "__main__":
+    _run_evaluator_tests()

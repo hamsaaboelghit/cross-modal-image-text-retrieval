@@ -1,7 +1,9 @@
 
+import json
 from pathlib import Path
 
-import torch
+import numpy as np
+import tensorflow as tf
 from PIL import Image
 
 from app.backend.model_service import ModelService
@@ -14,13 +16,13 @@ GALLERY_PATH = (
     PROJECT_ROOT
     / "results"
     / "retrieval_gallery_fold1"
-    / "gallery.pt"
+    / "gallery.npz"
 )
 
 
 class RetrievalService:
     """
-    Integrates the trained model, retrieval gallery,
+    Integrates the TensorFlow model, retrieval gallery,
     and RetrievalEngine.
 
     Supports:
@@ -33,61 +35,70 @@ class RetrievalService:
         self.retrieval_engine = None
         self.gallery_metadata = {}
 
-    def load(self):
-        """
-        Load the trained model and retrieval gallery,
-        then initialize the RetrievalEngine.
-        """
-
-        if self.is_loaded:
-            return self
-
+    def _load_gallery(self):
         if not GALLERY_PATH.is_file():
             raise FileNotFoundError(
-                f"Retrieval gallery not found: {GALLERY_PATH}"
+                f"Retrieval gallery not found: {GALLERY_PATH}. "
+                "Run src/retrieval/build_gallery.py first."
             )
 
-        print("Loading Model Service...")
-
-        self.model_service = ModelService().load()
-
-        print("Loading Retrieval Gallery...")
-
-        gallery = torch.load(
+        with np.load(
             GALLERY_PATH,
-            map_location="cpu",
-            weights_only=True,
+            allow_pickle=False,
+        ) as gallery_file:
+            required_keys = {
+                "image_embeddings",
+                "text_embeddings",
+                "image_names",
+                "captions_json",
+                "metadata_json",
+            }
+
+            missing = required_keys - set(gallery_file.files)
+
+            if missing:
+                raise ValueError(
+                    f"Gallery is missing keys: {missing}"
+                )
+
+            image_embeddings = gallery_file[
+                "image_embeddings"
+            ].copy()
+
+            text_embeddings = gallery_file[
+                "text_embeddings"
+            ].copy()
+
+            image_names = gallery_file[
+                "image_names"
+            ].astype(str).tolist()
+
+            captions = json.loads(
+                str(gallery_file["captions_json"].item())
+            )
+
+            metadata = json.loads(
+                str(gallery_file["metadata_json"].item())
+            )
+
+        return (
+            image_embeddings,
+            text_embeddings,
+            image_names,
+            captions,
+            metadata,
         )
 
-        required_keys = {
-            "image_embeddings",
-            "text_embeddings",
-            "image_names",
-            "captions",
-            "metadata",
-        }
-
-        if not isinstance(gallery, dict):
-            raise TypeError("Gallery must be a dictionary.")
-
-        missing_keys = required_keys - gallery.keys()
-
-        if missing_keys:
-            raise ValueError(
-                f"Gallery is missing keys: {missing_keys}"
-            )
-
-        image_embeddings = gallery["image_embeddings"]
-        text_embeddings = gallery["text_embeddings"]
-        image_names = gallery["image_names"]
-        captions = gallery["captions"]
-        metadata = gallery["metadata"]
-
+    def _validate_gallery(
+        self,
+        image_embeddings,
+        text_embeddings,
+        image_names,
+        captions,
+        metadata,
+    ):
         if metadata.get("fold") != 1:
             raise ValueError("Unexpected gallery fold.")
-
-        if metadata.get("model_type") != "ResNet50-LSTM":
-            raise ValueError("Unexpected gallery model type.")
 
         if metadata.get("test_set_used") is not False:
             raise ValueError(
@@ -99,11 +110,87 @@ class RetrievalService:
                 "Unexpected gallery embedding dimension."
             )
 
+        image_count = len(image_names)
+
+        if image_embeddings.shape != (image_count, 512):
+            raise ValueError(
+                "Invalid image embeddings shape: "
+                f"{image_embeddings.shape}"
+            )
+
+        if text_embeddings.shape != (image_count, 5, 512):
+            raise ValueError(
+                "Invalid text embeddings shape: "
+                f"{text_embeddings.shape}"
+            )
+
+        if len(captions) != image_count:
+            raise ValueError(
+                "Captions count does not match image count."
+            )
+
+        if len(image_names) != len(set(image_names)):
+            raise ValueError("Duplicate image names detected.")
+
+        for index, image_captions in enumerate(captions):
+            if len(image_captions) != 5:
+                raise ValueError(
+                    f"Image {image_names[index]} must have "
+                    "exactly 5 captions."
+                )
+
+        if not np.isfinite(image_embeddings).all():
+            raise ValueError(
+                "Non-finite image embeddings detected."
+            )
+
+        if not np.isfinite(text_embeddings).all():
+            raise ValueError(
+                "Non-finite text embeddings detected."
+            )
+
+    def load(self):
+        if self.is_loaded:
+            return self
+
+        print("Loading TensorFlow Model Service...")
+        self.model_service = ModelService().load()
+
+        print("Loading Retrieval Gallery...")
+        (
+            image_embeddings,
+            text_embeddings,
+            image_names,
+            captions,
+            metadata,
+        ) = self._load_gallery()
+
+        self._validate_gallery(
+            image_embeddings,
+            text_embeddings,
+            image_names,
+            captions,
+            metadata,
+        )
+
+        if metadata.get("model_type") != self.model_service.model_type:
+            raise ValueError(
+                "Gallery model type does not match the loaded model. "
+                f"Gallery: {metadata.get('model_type')}, "
+                f"Model: {self.model_service.model_type}."
+            )
+
         print("Initializing Retrieval Engine...")
 
         self.retrieval_engine = RetrievalEngine(
-            image_embeddings=image_embeddings,
-            text_embeddings=text_embeddings,
+            image_embeddings=tf.convert_to_tensor(
+                image_embeddings,
+                dtype=tf.float32,
+            ),
+            text_embeddings=tf.convert_to_tensor(
+                text_embeddings,
+                dtype=tf.float32,
+            ),
             image_names=image_names,
             captions=captions,
         )
@@ -115,10 +202,6 @@ class RetrievalService:
         return self
 
     def search_text(self, query: str, top_k: int = 5):
-        """
-        Retrieve images using a natural language query.
-        """
-
         if not self.is_loaded:
             raise RuntimeError(
                 "Retrieval Service is not loaded."
@@ -128,6 +211,9 @@ class RetrievalService:
             raise ValueError(
                 "Query must be a non-empty string."
             )
+
+        if not isinstance(top_k, int) or not 1 <= top_k <= 50:
+            raise ValueError("top_k must be between 1 and 50.")
 
         query_embedding = (
             self.model_service.get_text_embedding(query)
@@ -141,19 +227,16 @@ class RetrievalService:
         return results[0]
 
     def search_image(self, image: Image.Image, top_k: int = 5):
-        """
-        Retrieve captions using an input image.
-        """
-
         if not self.is_loaded:
             raise RuntimeError(
                 "Retrieval Service is not loaded."
             )
 
         if not isinstance(image, Image.Image):
-            raise TypeError(
-                "Expected a PIL Image."
-            )
+            raise TypeError("Expected a PIL Image.")
+
+        if not isinstance(top_k, int) or not 1 <= top_k <= 50:
+            raise ValueError("top_k must be between 1 and 50.")
 
         query_embedding = (
             self.model_service.get_image_embedding(image)

@@ -1,26 +1,23 @@
 
-
 # VisionMatch AI
 ## Cross-Modal Image–Text Retrieval Using Deep Learning
 
-### 1. Project Overview
+VisionMatch AI is a deep learning system that connects images and natural language in a shared embedding space. It allows users to search for images using text descriptions and retrieve captions that match a given image.
 
-VisionMatch AI is a deep learning project that connects images and natural language through a shared embedding space.
+The project investigates different neural network architectures and contrastive learning objectives for cross-modal image–text retrieval.
 
-The system supports two main retrieval tasks:
+## 1. Problem Definition
+
+Traditional image retrieval systems often rely on visual similarity or manually assigned tags. This project explores a more flexible approach: retrieving images using natural language.
+
+The main challenge is learning a shared representation space where semantically related images and captions are mapped close to each other.
+
+The system supports two retrieval tasks:
 
 - **Text-to-Image Retrieval:** Given a text description, retrieve the most relevant images.
 - **Image-to-Text Retrieval:** Given an image, retrieve the most relevant captions.
 
-The project explores different deep learning architectures for learning meaningful cross-modal representations and compares their retrieval performance.
-
-### 2. Problem Definition
-
-Traditional image retrieval systems often depend on visual features or manually assigned tags. VisionMatch AI aims to make image retrieval more flexible by allowing users to search using natural language.
-
-The main challenge is learning a shared representation space in which semantically related images and captions are mapped close to each other.
-
-### 3. Dataset
+## 2. Dataset
 
 The project uses the **Flickr30k dataset**.
 
@@ -28,10 +25,12 @@ The project uses the **Flickr30k dataset**.
 - Total captions: 158,915
 - Captions per image: 5
 
-The dataset is divided at the image level:
+### Data split
+
+The dataset is divided at the image level to prevent images or their captions from appearing in multiple splits.
 
 - Development set: 80% (25,426 images)
-- Test set: 20% (6,357 images)
+- Held-out test set: 20% (6,357 images)
 
 The development set is divided into five folds for cross-validation.
 
@@ -39,170 +38,118 @@ The development set is divided into five folds for cross-validation.
 - Training images: 20,340
 - Validation images: 5,086
 
-The test set remains untouched during model development and validation to prevent data leakage.
+The held-out test set is kept separate from training, model selection, and validation.
 
-**Dataset License Notice:** The dataset images are copyrighted by their respective owners. The dataset source specifies non-commercial research and educational use. Users must follow the original dataset terms.
+**Dataset License Notice:** Flickr30k images are copyrighted by their respective owners. The dataset is intended for research and educational use under its applicable terms. Users must follow the original dataset license and usage conditions.
 
-### 4. Data Preprocessing
+## 3. Data Preprocessing
 
 The preprocessing pipeline includes:
 
-- Image resizing to 224 × 224.
-- Conversion to tensors.
-- ImageNet normalization.
-- Caption tokenization.
-- Vocabulary construction using training captions only.
-- Addition of special tokens:
-  - BOS
-  - EOS
-  - UNK
-  - PAD
-- Caption encoding with a maximum sequence length of 34.
+- Resizing images to 224 × 224.
+- Converting images into TensorFlow tensors.
+- Applying ImageNet normalization and preprocessing.
+- Tokenizing captions.
+- Building a vocabulary using training captions only.
+- Adding special tokens: PAD, UNK, BOS, and EOS.
+- Encoding captions with a maximum sequence length of 34.
+- Creating TensorFlow `tf.data` pipelines for batching and training.
 
-The vocabulary is built separately for each fold using only its training data.
+Vocabulary construction is performed separately for each fold using only that fold's training data.
 
-### 5. Model Architectures
+## 4. Model Architectures
 
-The project explores several architectures for cross-modal image–text retrieval.
+The project explores multiple architectures for learning image and text representations.
 
-#### 5.1 ResNet50 + LSTM
+### 4.1 Baseline Model
+
+A lightweight baseline architecture provides a reference point for evaluating more advanced models.
+
+- CNN-based image feature extraction.
+- Embedding-based text representation.
+- Projection of both modalities into a shared embedding space.
+
+### 4.2 ResNet50 + LSTM
 
 - ResNet50 extracts visual features from images.
 - LSTM processes caption sequences.
-- Attention mechanisms help the model focus on relevant information.
-- Both modalities are projected into a shared 512-dimensional embedding space.
+- Additive Attention can help the text encoder focus on relevant sequence information.
+- Projection heads map both modalities into a shared 512-dimensional embedding space.
 
-#### 5.2 GRU
-
-- ResNet50 extracts image features.
-- GRU processes text sequences.
-- The model learns representations for both modalities in a shared embedding space.
-
-#### 5.3 Transformer
+### 4.3 ResNet50 + GRU
 
 - ResNet50 extracts image features.
-- Transformer Encoder processes text sequences.
-- Self-attention captures relationships between words.
+- GRU processes caption sequences.
+- Image and text representations are projected into the shared embedding space.
 
-#### 5.4 Cross-Modal Attention
+### 4.4 ResNet50 + Transformer
 
-This architecture extends the LSTM-based model by introducing cross-modal attention.
+- ResNet50 extracts visual features.
+- Transformer Encoder processes caption sequences.
+- Self-attention models relationships between words.
 
-It allows the model to learn interactions between image and text representations before producing the final embeddings.
+### 4.5 Cross-Modal Attention
 
-#### 5.5 Baseline Model
+This architecture extends the image–text representation process with multi-head cross-modal attention to model interactions between visual and textual features.
 
-A simpler architecture is implemented as a baseline for comparison.
+## 5. Attention Mechanisms
 
-- Custom CNN for image feature extraction.
-- Embedding layer and mean pooling for text representation.
-- Projection into a shared embedding space.
-
-### 6. Attention Mechanisms
-
-The project implements two attention mechanisms:
+Two attention mechanisms are implemented:
 
 **Additive Attention**
 
-Helps the text encoder focus on relevant information in the sequence.
+Helps the text encoder assign different importance to elements in a caption sequence.
 
 **Cross-Modal Attention**
 
 Uses multi-head attention to model interactions between image and text features.
 
-### 7. Loss Functions
+## 6. Loss Functions
 
 The project implements multiple contrastive learning objectives:
 
 - Multi-Positive InfoNCE Loss
-- Margin-Based Contrastive Loss
 - Triplet Contrastive Loss
+- Margin-Based Contrastive Loss
 
-The main experiments currently use Multi-Positive InfoNCE Loss with a temperature of 0.07.
+Multi-Positive InfoNCE is particularly relevant to Flickr30k because each image has five corresponding captions.
 
-This loss is suitable for Flickr30k because each image has five corresponding captions.
+The main experimental configuration uses a temperature of 0.07.
 
-### 8. Training Pipeline
+## 7. Training Pipeline
 
-The training pipeline includes:
+The training pipeline is implemented using **TensorFlow and Keras**.
 
-- PyTorch-based training.
+It includes:
+
+- TensorFlow-based model training.
 - AdamW optimizer.
-- Learning rate scheduling.
-- Automatic Mixed Precision (AMP).
-- Checkpoint saving.
-- Early stopping support.
+- Learning-rate scheduling.
 - Training and validation loss tracking.
+- Model checkpoint saving and restoration.
+- Early stopping support.
+- Reproducible random seeds.
+- Configurable training parameters.
 
-Current architecture experiments use Fold 1, batch size 8, five epochs, and learning rate 0.0001.
+The initial experiment configuration uses:
 
-The experiments are preliminary and use a single random seed (42).
+| Parameter | Value |
+|---|---|
+| Framework | TensorFlow 2.16.2 |
+| Fold | 1 |
+| Batch size | 8 |
+| Epochs | 5 |
+| Optimizer | AdamW |
+| Learning rate | 0.0001 |
+| Loss | Multi-Positive InfoNCE |
+| Temperature | 0.07 |
+| Random seed | 42 |
 
-### 9. Training Results
+These are initial experiment settings and may change during further experimentation.
 
-#### 9.1 ResNet50 + LSTM
+## 8. Evaluation Metrics
 
-| Epoch | Training Loss | Validation Loss |
-|---|---:|---:|
-| 1 | 2.692940 | 2.635147 |
-| 2 | 2.542591 | 2.557564 |
-| 3 | 2.453336 | 2.481921 |
-| 4 | 2.374338 | 2.456124 |
-| 5 | 2.308687 | 2.397168 |
-
-Best validation loss: **2.397168**
-
-#### 9.2 GRU
-
-| Epoch | Training Loss | Validation Loss |
-|---|---:|---:|
-| 1 | 2.875395 | 2.883835 |
-| 2 | 2.856948 | 2.883868 |
-| 3 | 2.852591 | 2.883980 |
-| 4 | 2.851523 | 2.883884 |
-| 5 | 2.851102 | 2.883975 |
-
-#### 9.3 Transformer
-
-| Epoch | Training Loss | Validation Loss |
-|---|---:|---:|
-| 1 | 2.869546 | 2.883902 |
-| 2 | 2.852899 | 2.883901 |
-| 3 | 2.849560 | 2.883904 |
-| 4 | 2.848843 | 2.884068 |
-| 5 | 2.848328 | 2.883847 |
-
-#### 9.4 Cross-Modal Attention
-
-| Epoch | Training Loss | Validation Loss |
-|---|---:|---:|
-| 1 | 2.878524 | 2.869938 |
-| 2 | 2.835419 | 2.838400 |
-| 3 | 2.834029 | 2.844889 |
-| 4 | 2.833444 | 2.805361 |
-| 5 | 2.810617 | 2.796555 |
-
-### 10. Preliminary Retrieval Evaluation
-
-The following results were obtained on the validation set.
-
-| Architecture | Text-to-Image R@1 | Image-to-Text R@1 |
-|---|---:|---:|
-| ResNet50 + LSTM | 3.496% | 5.289% |
-| GRU | 0.0118% | 0.0197% |
-| Transformer | 0.0118% | 0.0197% |
-| Cross-Modal Attention | 0.0236% | 0.0197% |
-| Baseline | Pending | Pending |
-
-These results are preliminary.
-
-The LSTM checkpoint was trained and resumed differently from the other architecture experiments. Therefore, the current results should not be treated as a definitive or fully fair architecture comparison.
-
-Further experiments with consistent training settings and multiple random seeds are required.
-
-### 11. Retrieval Evaluation Metrics
-
-The evaluation pipeline supports:
+The retrieval evaluation pipeline supports:
 
 - Recall@1
 - Recall@5
@@ -213,33 +160,30 @@ The evaluation pipeline supports:
 
 Both retrieval directions are evaluated:
 
-- Text-to-Image
-- Image-to-Text
+- **Text-to-Image:** Each caption is used to retrieve its corresponding image.
+- **Image-to-Text:** Each image is used to retrieve its five corresponding captions.
 
-For Image-to-Text retrieval, all five captions belonging to the target image are considered relevant.
+Evaluation is performed using image-caption relevance information.
 
-### 12. Retrieval Gallery
+## 9. Retrieval Gallery
 
-A retrieval gallery has been generated using the Fold 1 development data.
+The retrieval gallery is intended to contain image and caption embeddings generated by a trained TensorFlow model.
 
-Current gallery statistics:
+The gallery is built from development data only. The held-out test set must not be included.
 
-- Images: 25,426
-- Image embeddings: 25,426
-- Text embeddings: 127,130
-- Embedding dimension: 512
+The gallery stores:
 
-Gallery file:
+- Image embeddings.
+- Text embeddings.
+- Image names.
+- Captions.
+- Metadata describing the model and gallery configuration.
 
-`results/retrieval_gallery_fold1/gallery.pt`
+The gallery is used by the retrieval engine to perform similarity-based searches.
 
-The gallery is built from development data, excluding the held-out test set.
-
-### 13. Backend
+## 10. Backend
 
 The project includes a FastAPI backend for retrieval operations.
-
-Available routes:
 
 | Method | Endpoint | Description |
 |---|---|---|
@@ -248,25 +192,30 @@ Available routes:
 | POST | `/search/text` | Text-to-Image retrieval |
 | POST | `/search/image` | Image-to-Text retrieval |
 
-Start the backend using:
+Start the backend from the project root:
 
 ```bash
 python -m uvicorn app.backend.main:app --reload
 ```
 
-Swagger documentation:
+Swagger API documentation:
 
-`http://127.0.0.1:8000/docs`
+```text
+http://127.0.0.1:8000/docs
+```
 
-The backend has successfully started locally and loaded the model and retrieval gallery. Full endpoint integration testing is still pending.
+The backend requires a compatible trained TensorFlow checkpoint and a generated retrieval gallery.
 
-### 14. Project Structure
+## 11. Project Structure
 
 ```text
 cross-modal-image-text-retrieval/
 │
 ├── app/
 │   └── backend/
+│       ├── main.py
+│       ├── model_service.py
+│       └── retrieval_service.py
 │
 ├── data/
 │   ├── raw/
@@ -282,16 +231,17 @@ cross-modal-image-text-retrieval/
 │   ├── data/
 │   ├── models/
 │   ├── training/
-│   └── evaluation/
+│   ├── evaluation/
+│   └── retrieval/
 │
 ├── requirements.txt
 ├── .gitignore
 └── README.md
 ```
 
-### 15. Main Experiment Scripts
+## 12. Main Experiment Scripts
 
-**Training:**
+Training scripts:
 
 ```text
 src/training/run_baseline_experiment.py
@@ -300,30 +250,20 @@ src/training/run_transformer_experiment.py
 src/training/run_cross_attention_experiment.py
 ```
 
-**Evaluation:**
+Retrieval gallery generation:
 
 ```text
-src/evaluation/evaluate_real_checkpoint.py
-src/evaluation/evaluate_gru.py
-src/evaluation/evaluate_transformer.py
-src/evaluation/evaluate_cross_attention.py
+src/retrieval/build_gallery.py
 ```
 
-### 16. Experiment Results Files
-
-The architecture comparison results are saved in:
+Evaluation and retrieval modules are organized under:
 
 ```text
-results/experiments/architecture_comparison/
+src/evaluation/
+src/retrieval/
 ```
 
-Files include:
-
-- `visionmatch_model_comparison.csv`
-- `visionmatch_model_comparison.json`
-- `visionmatch_experiment_report.md`
-
-### 17. Installation
+## 13. Installation
 
 Clone the repository:
 
@@ -337,56 +277,64 @@ Navigate to the project directory:
 cd cross-modal-image-text-retrieval
 ```
 
-Create and activate a virtual environment:
+Create a virtual environment:
 
 ```bash
 python -m venv .venv
 ```
 
-On Windows:
+Activate it on Windows:
 
 ```powershell
 .venv\Scripts\Activate.ps1
 ```
 
-Install dependencies:
+Install the required packages:
 
 ```bash
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Dataset preparation and preprocessing should be completed before running training experiments.
+Prepare the Flickr30k dataset and run the preprocessing pipeline before starting training.
 
-### 18. Current Project Status
+## 14. Current Project Status
 
-**Implemented:**
+### Implemented
+
 - Flickr30k data processing pipeline.
 - Image and caption preprocessing.
 - Five-fold development split.
-- Multiple model architectures.
+- CNN-based image encoder.
+- RNN, LSTM, GRU, and Transformer text encoders.
+- Additive Attention.
+- Cross-Modal Attention.
+- Shared image–text embedding model.
 - Contrastive loss implementations.
-- Training and checkpoint management.
-- Preliminary architecture experiments.
-- Retrieval evaluation pipeline.
-- Retrieval gallery generation.
-- FastAPI backend startup.
+- TensorFlow training components.
+- Retrieval metrics and evaluation components.
+- Retrieval engine.
 
-**Still in progress:**
-- Baseline retrieval evaluation.
-- Consistent multi-seed architecture comparisons.
-- Full five-fold experiments.
-- Hyperparameter tuning.
+### In Progress
+
+- Full training pipeline integration.
+- Consistent training of all model architectures.
+- TensorFlow checkpoint validation and restoration.
+- Retrieval gallery generation.
+- FastAPI endpoint integration testing.
+- Architecture comparison using consistent experimental settings.
+- Multi-seed experiments.
+- Five-fold cross-validation.
 - Loss function comparisons.
 - Ablation studies.
 - Final evaluation on the held-out test set.
 - Error analysis and computational cost comparison.
 - FAISS-based retrieval optimization.
-- Full API endpoint testing.
 - Website and application integration.
 
-### 19. Reproducibility
+## 15. Experimental Reproducibility
 
-The current experiments use:
+The initial experiment configuration uses:
 
 - Random seed: 42
 - Fold: 1
@@ -397,21 +345,26 @@ The current experiments use:
 - Loss: Multi-Positive InfoNCE
 - Temperature: 0.07
 
-Checkpoints, processed datasets, and experiment outputs are kept outside Git tracking where appropriate.
+For a fair architecture comparison, models should use consistent data splits, evaluation procedures, and comparable training configurations.
 
-### 20. Technologies Used
+Final results should be reported only after the TensorFlow experiments have been completed and evaluated.
+
+## 16. Technologies Used
 
 - Python
-- PyTorch
-- Torchvision
+- TensorFlow 2.16.2
+- Keras
 - NumPy
 - Pandas
 - Scikit-learn
+- Pillow
+- OpenCV
+- Matplotlib
 - FastAPI
 - Uvicorn
+- Pytest
 - Git and GitHub
 
 ---
 
-**VisionMatch AI** aims to provide a flexible cross-modal retrieval system that connects visual information with natural language, while investigating how different deep learning architectures affect retrieval quality.
-
+**VisionMatch AI** aims to provide a flexible cross-modal retrieval system that connects visual information with natural language while investigating how different deep learning architectures and learning objectives affect retrieval performance.
