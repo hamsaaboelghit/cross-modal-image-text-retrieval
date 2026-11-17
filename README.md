@@ -1,471 +1,417 @@
+
+
 # VisionMatch AI
+## Cross-Modal Image–Text Retrieval Using Deep Learning
 
-### Cross-Modal Image-Text Retrieval Using Deep Learning
+### 1. Project Overview
 
-VisionMatch AI is a deep learning project for **bidirectional image-text retrieval and semantic representation learning**.
+VisionMatch AI is a deep learning project that connects images and natural language through a shared embedding space.
 
-The system learns a shared embedding space for images and natural language descriptions, allowing users to retrieve relevant images using text queries and find matching captions for input images.
+The system supports two main retrieval tasks:
 
-The project explores CNN-based visual encoding, sequential text modeling, Transformer architectures, attention mechanisms, cross-modal interaction, and contrastive learning.
+- **Text-to-Image Retrieval:** Given a text description, retrieve the most relevant images.
+- **Image-to-Text Retrieval:** Given an image, retrieve the most relevant captions.
 
----
+The project explores different deep learning architectures for learning meaningful cross-modal representations and compares their retrieval performance.
 
-## Project Overview
+### 2. Problem Definition
 
-VisionMatch AI follows a cross-modal retrieval pipeline consisting of:
+Traditional image retrieval systems often depend on visual features or manually assigned tags. VisionMatch AI aims to make image retrieval more flexible by allowing users to search using natural language.
 
-- **Image Encoder:** Extracts visual representations from images using CNN architectures.
-- **Text Encoder:** Converts natural language captions into meaningful feature representations.
-- **Projection Layers:** Map image and text features into a shared embedding space.
-- **Attention Mechanisms:** Focus on relevant visual and textual features.
-- **Cross-Modal Attention:** Enables interaction between image regions and text tokens.
-- **Contrastive Learning:** Aligns matching image-caption pairs in the shared embedding space.
+The main challenge is learning a shared representation space in which semantically related images and captions are mapped close to each other.
 
-The system supports two retrieval directions:
+### 3. Dataset
 
-1. **Text-to-Image Retrieval:** Retrieve relevant images using a natural language query.
-2. **Image-to-Text Retrieval:** Retrieve matching captions for an input image.
+The project uses the **Flickr30k dataset**.
 
----
+- Total images: 31,783
+- Total captions: 158,915
+- Captions per image: 5
 
-## Dataset
+The dataset is divided at the image level:
 
-### Flickr30k
+- Development set: 80% (25,426 images)
+- Test set: 20% (6,357 images)
 
-Flickr30k is the primary dataset used for training and evaluating the image-text retrieval models.
+The development set is divided into five folds for cross-validation.
 
-| Statistic | Value |
-|---|---:|
-| Total Images | 31,783 |
-| Total Captions | 158,915 |
-| Captions per Image | 5 |
-| Maximum Encoded Caption Length | 34 |
+**Fold 1:**
+- Training images: 20,340
+- Validation images: 5,086
 
-### Data Splitting Strategy
+The test set remains untouched during model development and validation to prevent data leakage.
 
-- 80% Development Set
-- 20% Independent Test Set
-- 5-Fold Cross-Validation within the Development Set
+**Dataset License Notice:** The dataset images are copyrighted by their respective owners. The dataset source specifies non-commercial research and educational use. Users must follow the original dataset terms.
 
-All captions belonging to the same image are kept together to prevent data leakage.
+### 4. Data Preprocessing
 
-The vocabulary is built independently from each fold's training captions. Validation and test data are excluded from vocabulary construction.
+The preprocessing pipeline includes:
 
-### Image Preprocessing
+- Image resizing to 224 × 224.
+- Conversion to tensors.
+- ImageNet normalization.
+- Caption tokenization.
+- Vocabulary construction using training captions only.
+- Addition of special tokens:
+  - BOS
+  - EOS
+  - UNK
+  - PAD
+- Caption encoding with a maximum sequence length of 34.
 
-- RGB conversion
-- Resize to 224 × 224
-- Tensor conversion
-- ImageNet normalization
+The vocabulary is built separately for each fold using only its training data.
 
-### Text Preprocessing
+### 5. Model Architectures
 
-- Caption tokenization and encoding
-- Vocabulary construction
-- Padding and truncation
-- Special tokens: PAD, UNK, BOS, EOS
+The project explores several architectures for cross-modal image–text retrieval.
 
----
+#### 5.1 ResNet50 + LSTM
 
-## Model Architectures
+- ResNet50 extracts visual features from images.
+- LSTM processes caption sequences.
+- Attention mechanisms help the model focus on relevant information.
+- Both modalities are projected into a shared 512-dimensional embedding space.
 
-### 1. Baseline Model
+#### 5.2 GRU
 
-- CNN-based image encoder
-- Embedding-based text encoder
-- Mean pooling for caption representation
-- Shared embedding space
+- ResNet50 extracts image features.
+- GRU processes text sequences.
+- The model learns representations for both modalities in a shared embedding space.
 
-### 2. Sequential Architectures
+#### 5.3 Transformer
 
-The project supports several recurrent text encoders:
+- ResNet50 extracts image features.
+- Transformer Encoder processes text sequences.
+- Self-attention captures relationships between words.
 
-- RNN
-- LSTM
-- GRU
-- Bidirectional RNN
-- Bidirectional LSTM
-- Bidirectional GRU
+#### 5.4 Cross-Modal Attention
 
-These architectures model sequential dependencies between words in natural language captions.
+This architecture extends the LSTM-based model by introducing cross-modal attention.
 
-### 3. Transformer Architecture
+It allows the model to learn interactions between image and text representations before producing the final embeddings.
 
-A Transformer-based text encoder is implemented to model contextual relationships between words in captions.
+#### 5.5 Baseline Model
 
-### 4. Advanced Cross-Modal Architecture
+A simpler architecture is implemented as a baseline for comparison.
 
-The advanced architecture extends the retrieval framework with:
+- Custom CNN for image feature extraction.
+- Embedding layer and mean pooling for text representation.
+- Projection into a shared embedding space.
 
-- ResNet50 visual feature extraction
-- Spatial image representations
-- Sequential text representations
-- Multi-Head Cross-Modal Attention
-- Image-text matching score prediction
+### 6. Attention Mechanisms
 
----
+The project implements two attention mechanisms:
 
-## Attention Mechanisms
+**Additive Attention**
 
-The project includes:
+Helps the text encoder focus on relevant information in the sequence.
 
-- Additive Attention
-- Multi-Head Cross-Modal Attention
+**Cross-Modal Attention**
 
-These mechanisms help the model focus on relevant information across text tokens and image regions.
+Uses multi-head attention to model interactions between image and text features.
 
----
+### 7. Loss Functions
 
-## Loss Functions
+The project implements multiple contrastive learning objectives:
 
-Three contrastive learning objectives are implemented:
+- Multi-Positive InfoNCE Loss
+- Margin-Based Contrastive Loss
+- Triplet Contrastive Loss
 
-1. Multi-Positive InfoNCE Loss
-2. Margin-Based Contrastive Loss
-3. Triplet Contrastive Loss
+The main experiments currently use Multi-Positive InfoNCE Loss with a temperature of 0.07.
 
-These objectives support comparative experiments for learning aligned image and text representations.
+This loss is suitable for Flickr30k because each image has five corresponding captions.
 
----
+### 8. Training Pipeline
 
-## Training Pipeline
+The training pipeline includes:
 
-A modular training pipeline supports model training, validation, checkpoint management, and experiment tracking.
+- PyTorch-based training.
+- AdamW optimizer.
+- Learning rate scheduling.
+- Automatic Mixed Precision (AMP).
+- Checkpoint saving.
+- Early stopping support.
+- Training and validation loss tracking.
 
-### Training Configuration
+Current architecture experiments use Fold 1, batch size 8, five epochs, and learning rate 0.0001.
 
-- Configurable number of epochs and batch size
-- Learning rate and weight decay
-- Optimizer and scheduler selection
-- Loss function selection
-- Gradient clipping
-- Mixed-precision training support
-- Device selection (CPU/CUDA)
-- Fold and random seed configuration
+The experiments are preliminary and use a single random seed (42).
 
-### Optimizers
+### 9. Training Results
 
-- Adam
-- AdamW
-- SGD
+#### 9.1 ResNet50 + LSTM
 
-### Learning Rate Schedulers
+| Epoch | Training Loss | Validation Loss |
+|---|---:|---:|
+| 1 | 2.692940 | 2.635147 |
+| 2 | 2.542591 | 2.557564 |
+| 3 | 2.453336 | 2.481921 |
+| 4 | 2.374338 | 2.456124 |
+| 5 | 2.308687 | 2.397168 |
 
-- StepLR
-- CosineAnnealingLR
-- ReduceLROnPlateau
-- No scheduler
+Best validation loss: **2.397168**
 
-### Training and Validation
+#### 9.2 GRU
 
-- Modular Trainer and Evaluator components
-- Training and validation loss tracking
-- Gradient clipping support
-- Optional CUDA automatic mixed precision
-- Global training step tracking
+| Epoch | Training Loss | Validation Loss |
+|---|---:|---:|
+| 1 | 2.875395 | 2.883835 |
+| 2 | 2.856948 | 2.883868 |
+| 3 | 2.852591 | 2.883980 |
+| 4 | 2.851523 | 2.883884 |
+| 5 | 2.851102 | 2.883975 |
 
-### Checkpoint Management
+#### 9.3 Transformer
 
-- Latest checkpoint saving
-- Best model checkpoint saving
-- Optional per-epoch checkpoint saving
-- Model, optimizer, and scheduler state restoration
-- Training progress and early-stopping state restoration
+| Epoch | Training Loss | Validation Loss |
+|---|---:|---:|
+| 1 | 2.869546 | 2.883902 |
+| 2 | 2.852899 | 2.883901 |
+| 3 | 2.849560 | 2.883904 |
+| 4 | 2.848843 | 2.884068 |
+| 5 | 2.848328 | 2.883847 |
 
-### Experiment Logging
+#### 9.4 Cross-Modal Attention
 
-- CSV-based training logs
-- Training and validation loss tracking
-- Learning-rate tracking
-- Epoch and training-step tracking
+| Epoch | Training Loss | Validation Loss |
+|---|---:|---:|
+| 1 | 2.878524 | 2.869938 |
+| 2 | 2.835419 | 2.838400 |
+| 3 | 2.834029 | 2.844889 |
+| 4 | 2.833444 | 2.805361 |
+| 5 | 2.810617 | 2.796555 |
 
-### Early Stopping
+### 10. Preliminary Retrieval Evaluation
 
-- Configurable patience
-- Minimum improvement threshold
-- Early-stopping state persistence
-- Early-stopping state restoration when resuming training
+The following results were obtained on the validation set.
 
----
+| Architecture | Text-to-Image R@1 | Image-to-Text R@1 |
+|---|---:|---:|
+| ResNet50 + LSTM | 3.496% | 5.289% |
+| GRU | 0.0118% | 0.0197% |
+| Transformer | 0.0118% | 0.0197% |
+| Cross-Modal Attention | 0.0236% | 0.0197% |
+| Baseline | Pending | Pending |
 
-## Retrieval System
+These results are preliminary.
 
-The retrieval system uses precomputed image and text embeddings to perform similarity-based search.
+The LSTM checkpoint was trained and resumed differently from the other architecture experiments. Therefore, the current results should not be treated as a definitive or fully fair architecture comparison.
 
-### Retrieval Gallery
+Further experiments with consistent training settings and multiple random seeds are required.
 
-The Retrieval Gallery stores precomputed embeddings and their associated metadata for efficient retrieval.
+### 11. Retrieval Evaluation Metrics
 
-For Fold 1, the gallery is constructed from the training and validation splits of the development dataset.
+The evaluation pipeline supports:
 
-It contains:
+- Recall@1
+- Recall@5
+- Recall@10
+- Mean Reciprocal Rank (MRR)
+- Median Rank
+- Mean Recall
 
-- Image embeddings
-- Five text embeddings per image
-- Original image filenames
-- Original captions
-- Gallery metadata
+Both retrieval directions are evaluated:
 
-#### Gallery Statistics
+- Text-to-Image
+- Image-to-Text
 
-| Statistic | Value |
-|---|---:|
-| Development Images | 25,426 |
-| Image Embeddings | 25,426 |
-| Text Embeddings | 127,130 |
-| Captions per Image | 5 |
-| Embedding Dimension | 512 |
+For Image-to-Text retrieval, all five captions belonging to the target image are considered relevant.
 
-The embeddings are extracted using the trained ResNet50-LSTM model.
+### 12. Retrieval Gallery
 
-The gallery is serialized as a PyTorch file:
+A retrieval gallery has been generated using the Fold 1 development data.
+
+Current gallery statistics:
+
+- Images: 25,426
+- Image embeddings: 25,426
+- Text embeddings: 127,130
+- Embedding dimension: 512
+
+Gallery file:
 
 `results/retrieval_gallery_fold1/gallery.pt`
 
-The independent test split is excluded from gallery construction to preserve the evaluation protocol.
+The gallery is built from development data, excluding the held-out test set.
 
-### Retrieval Engine
+### 13. Backend
 
-The Retrieval Engine performs similarity-based search between input query embeddings and precomputed gallery embeddings.
+The project includes a FastAPI backend for retrieval operations.
 
-It supports:
-
-- Text-to-Image retrieval.
-- Image-to-Text retrieval.
-- Top-K result ranking.
-- Similarity score calculation.
-- Returning matching image filenames and captions.
-- Preserving image-caption associations.
-
-The engine uses normalized embeddings and dot-product similarity to rank the retrieval candidates.
-
-### Retrieval Operations
-
-**Text-to-Image Retrieval**
-
-1. Receive a natural language query.
-2. Convert the query into tokens using the trained vocabulary.
-3. Extract a text embedding using the Text Encoder.
-4. Compare the query embedding against gallery image embeddings.
-5. Return the Top-K most relevant images with similarity scores.
-
-**Image-to-Text Retrieval**
-
-1. Receive an input image.
-2. Preprocess the image using the model's image transformation pipeline.
-3. Extract an image embedding using the Image Encoder.
-4. Compare the query embedding against gallery text embeddings.
-5. Return the Top-K matching captions with similarity scores and image metadata.
-
----
-
-## Backend
-
-The project includes a FastAPI backend that connects the trained deep learning model and retrieval system to application interfaces.
-
-### Model Service
-
-The Model Service is responsible for:
-
-- Loading the trained model checkpoint.
-- Loading the corresponding vocabulary.
-- Preprocessing input images.
-- Tokenizing and encoding text queries.
-- Extracting image embeddings.
-- Extracting text embeddings.
-- Running inference on CPU or CUDA.
-
-### Retrieval Service
-
-The Retrieval Service integrates the Model Service, Retrieval Gallery, and Retrieval Engine into a unified search interface.
-
-It provides two main operations:
-
-- **Text-to-Image:** Converts a natural language query into a text embedding and retrieves the most relevant images.
-- **Image-to-Text:** Converts an input image into an image embedding and retrieves the most relevant captions.
-
-The service returns ranked retrieval results containing similarity scores and associated image or caption information.
-
-The retrieval operations are exposed through:
-
-```python
-service.search_text(query, top_k=5)
-
-service.search_image(image, top_k=5)
-```
-
-The Retrieval Service loads the trained model and gallery and initializes the Retrieval Engine for inference.
-
-### FastAPI Endpoints
-
-The backend exposes REST API endpoints for interacting with the retrieval system.
+Available routes:
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/` | Checks whether the backend is running. |
-| GET | `/health` | Returns backend status and model loading state. |
-| POST | `/search/text` | Retrieves relevant images using a text query. |
-| POST | `/search/image` | Retrieves matching captions using an uploaded image. |
+| GET | `/` | Root endpoint |
+| GET | `/health` | Health check |
+| POST | `/search/text` | Text-to-Image retrieval |
+| POST | `/search/image` | Image-to-Text retrieval |
 
-#### 1. Root Endpoint
-
-`GET /`
-
-Returns a message confirming that the backend is running.
-
-#### 2. Health Check
-
-`GET /health`
-
-Returns the backend status and whether the Retrieval Service is loaded.
-
-Example response:
-
-```json
-{
-    "status": "ok",
-    "backend": "VisionMatch AI",
-    "model_loaded": true
-}
-```
-
-#### 3. Text-to-Image Search
-
-`POST /search/text`
-
-Accepts a JSON request containing a natural language query and the desired number of results.
-
-**Request Body:**
-
-```json
-{
-    "query": "A person riding a bicycle on the street",
-    "top_k": 5
-}
-```
-
-**Response:**
-
-Returns the query, retrieval mode, requested number of results, and ranked image results with similarity scores.
-
-Each result includes the image filename and its similarity score.
-
-#### 4. Image-to-Text Search
-
-`POST /search/image`
-
-Accepts an uploaded image using `multipart/form-data` and retrieves the most relevant captions.
-
-**Parameters:**
-
-- `file`: Input image file (required).
-- `top_k`: Number of captions to retrieve (default: 5).
-
-**Example Request:**
-
-```bash
-curl -X POST \
-  "http://127.0.0.1:8000/search/image?top_k=5" \
-  -F "file=@1000092795.jpg"
-```
-
-**Response:**
-
-Returns the uploaded filename, retrieval mode, and ranked caption results with similarity scores and associated image metadata.
-
-### API Validation and Error Handling
-
-The API includes input validation and error handling:
-
-- Text queries must contain between 1 and 1000 characters.
-- `top_k` must be between 1 and 50.
-- Invalid image files return HTTP 400.
-- Invalid parameter values return HTTP 422.
-- An unavailable Retrieval Service returns HTTP 503.
-
-### API Documentation
-
-Interactive API documentation is available through Swagger UI:
-
-`http://127.0.0.1:8000/docs`
-
-The backend runs locally using Uvicorn:
+Start the backend using:
 
 ```bash
 python -m uvicorn app.backend.main:app --reload
 ```
 
-### API Framework
+Swagger documentation:
 
-- FastAPI
-- Uvicorn
-- CORS configuration
+`http://127.0.0.1:8000/docs`
 
----
+The backend has successfully started locally and loaded the model and retrieval gallery. Full endpoint integration testing is still pending.
 
-## Project Structure
+### 14. Project Structure
 
 ```text
 cross-modal-image-text-retrieval/
 │
 ├── app/
-│   ├── backend/
-│   │   ├── __init__.py
-│   │   ├── main.py
-│   │   ├── model_service.py
-│   │   └── retrieval_service.py
-│   │
-│   ├── web/
-│   └── desktop/
-│
-├── checkpoints/
-│   └── real_fold1/
+│   └── backend/
 │
 ├── data/
 │   ├── raw/
-│   ├── processed/
-│   └── splits/
+│   └── processed/
 │
-├── experiments/
-│   ├── model_configs.py
-│   └── test_model_configs.py
+├── checkpoints/
 │
 ├── results/
-│   ├── real_fold1/
+│   ├── experiments/
 │   └── retrieval_gallery_fold1/
 │
 ├── src/
 │   ├── data/
 │   ├── models/
-│   ├── retrieval/
-│   │   ├── __init__.py
-│   │   ├── retrieval_engine.py
-│   │   └── build_gallery.py
-│   │
-│   └── training/
+│   ├── training/
+│   └── evaluation/
 │
 ├── requirements.txt
+├── .gitignore
 └── README.md
 ```
 
----
+### 15. Main Experiment Scripts
 
-## Technologies
+**Training:**
+
+```text
+src/training/run_baseline_experiment.py
+src/training/run_gru_experiment.py
+src/training/run_transformer_experiment.py
+src/training/run_cross_attention_experiment.py
+```
+
+**Evaluation:**
+
+```text
+src/evaluation/evaluate_real_checkpoint.py
+src/evaluation/evaluate_gru.py
+src/evaluation/evaluate_transformer.py
+src/evaluation/evaluate_cross_attention.py
+```
+
+### 16. Experiment Results Files
+
+The architecture comparison results are saved in:
+
+```text
+results/experiments/architecture_comparison/
+```
+
+Files include:
+
+- `visionmatch_model_comparison.csv`
+- `visionmatch_model_comparison.json`
+- `visionmatch_experiment_report.md`
+
+### 17. Installation
+
+Clone the repository:
+
+```bash
+git clone https://github.com/hamsaaboelghit/cross-modal-image-text-retrieval.git
+```
+
+Navigate to the project directory:
+
+```bash
+cd cross-modal-image-text-retrieval
+```
+
+Create and activate a virtual environment:
+
+```bash
+python -m venv .venv
+```
+
+On Windows:
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+Install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Dataset preparation and preprocessing should be completed before running training experiments.
+
+### 18. Current Project Status
+
+**Implemented:**
+- Flickr30k data processing pipeline.
+- Image and caption preprocessing.
+- Five-fold development split.
+- Multiple model architectures.
+- Contrastive loss implementations.
+- Training and checkpoint management.
+- Preliminary architecture experiments.
+- Retrieval evaluation pipeline.
+- Retrieval gallery generation.
+- FastAPI backend startup.
+
+**Still in progress:**
+- Baseline retrieval evaluation.
+- Consistent multi-seed architecture comparisons.
+- Full five-fold experiments.
+- Hyperparameter tuning.
+- Loss function comparisons.
+- Ablation studies.
+- Final evaluation on the held-out test set.
+- Error analysis and computational cost comparison.
+- FAISS-based retrieval optimization.
+- Full API endpoint testing.
+- Website and application integration.
+
+### 19. Reproducibility
+
+The current experiments use:
+
+- Random seed: 42
+- Fold: 1
+- Batch size: 8
+- Epochs: 5
+- Optimizer: AdamW
+- Learning rate: 0.0001
+- Loss: Multi-Positive InfoNCE
+- Temperature: 0.07
+
+Checkpoints, processed datasets, and experiment outputs are kept outside Git tracking where appropriate.
+
+### 20. Technologies Used
 
 - Python
 - PyTorch
 - Torchvision
 - NumPy
 - Pandas
-- OpenCV
 - Scikit-learn
 - FastAPI
 - Uvicorn
+- Git and GitHub
 
 ---
 
-## Project Goal
+**VisionMatch AI** aims to provide a flexible cross-modal retrieval system that connects visual information with natural language, while investigating how different deep learning architectures affect retrieval quality.
 
-The main goal of VisionMatch AI is to investigate how different deep learning architectures and cross-modal learning techniques affect image-text retrieval performance.
-
-The project focuses on learning meaningful shared representations, comparing visual and sequential feature extraction methods, and developing a practical bidirectional retrieval system with a reliable experimental evaluation methodology.
