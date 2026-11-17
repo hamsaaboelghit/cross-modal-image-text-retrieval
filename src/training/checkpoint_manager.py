@@ -1,56 +1,37 @@
-
+import json
 import math
-import torch
 from pathlib import Path
+
+import tensorflow as tf
 
 
 class CheckpointManager:
-    """
-    Handles saving and loading training checkpoints.
-
-    Saves:
-        - Model state
-        - Optimizer state
-        - Scheduler state
-        - Current epoch
-        - Current validation loss
-        - Best validation loss
-        - Global training step
-        - Training configuration
-        - Early stopping state
-
-    Always maintains:
-        - latest_checkpoint.pth
-
-    Also maintains:
-        - best_model.pth when validation improves
-        - Individual epoch checkpoints when save_best_only=False
-    """
+    """Save and restore TensorFlow model and optimizer checkpoints."""
 
     def __init__(self, checkpoint_dir="checkpoints"):
-
         self.checkpoint_dir = Path(checkpoint_dir)
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        self.checkpoint_dir.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
+        self.latest_dir = self.checkpoint_dir / "latest"
+        self.best_dir = self.checkpoint_dir / "best"
+
+        self.latest_dir.mkdir(parents=True, exist_ok=True)
+        self.best_dir.mkdir(parents=True, exist_ok=True)
 
         self.best_val_loss = float("inf")
 
-    # =====================================================
-    # Validation Helpers
-    # =====================================================
+        self.epoch = tf.Variable(0, dtype=tf.int64, trainable=False)
+        self.global_step = tf.Variable(0, dtype=tf.int64, trainable=False)
+        self.val_loss = tf.Variable(float("inf"), dtype=tf.float32, trainable=False)
+        self.best_loss = tf.Variable(float("inf"), dtype=tf.float32, trainable=False)
+
+        self.checkpoint = None
+        self.latest_manager = None
+        self.best_manager = None
 
     @staticmethod
     def _validate_finite_number(value, name):
-        """
-        Validate that a value is a finite numeric value.
-        """
-
-        if isinstance(value, bool) or not isinstance(
-            value, (int, float)
-        ):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError(f"{name} must be numeric.")
 
         if not math.isfinite(float(value)):
@@ -58,66 +39,65 @@ class CheckpointManager:
 
     @staticmethod
     def _validate_early_stopping_state(state):
-        """
-        Validate the optional early stopping state.
-        """
-
         if state is None:
             return
 
         if not isinstance(state, dict):
-            raise TypeError(
-                "early_stopping_state must be a dictionary or None."
-            )
+            raise TypeError("early_stopping_state must be a dictionary or None.")
 
-        required_keys = {
-            "best_loss",
-            "counter",
-            "early_stop",
-        }
+        required = {"best_loss", "counter", "early_stop"}
+        missing = required - state.keys()
 
-        missing_keys = required_keys - state.keys()
+        if missing:
+            raise KeyError(f"Missing early stopping keys: {missing}")
 
-        if missing_keys:
-            raise KeyError(
-                f"Invalid early stopping state. "
-                f"Missing keys: {missing_keys}"
-            )
+        if not isinstance(state["counter"], int) or state["counter"] < 0:
+            raise ValueError("Early stopping counter must be non-negative.")
+
+        if not isinstance(state["early_stop"], bool):
+            raise TypeError("early_stop must be boolean.")
 
         best_loss = state["best_loss"]
-        counter = state["counter"]
-        early_stop = state["early_stop"]
+        if not isinstance(best_loss, (int, float)) or math.isnan(float(best_loss)):
+            raise ValueError("Invalid early stopping best_loss.")
 
-        if (
-            isinstance(best_loss, bool)
-            or not isinstance(best_loss, (int, float))
-        ):
-            raise TypeError(
-                "Early stopping best_loss must be numeric."
-            )
+    def _build_managers(self, model, optimizer=None):
+        objects = {
+            "model": model,
+            "epoch": self.epoch,
+            "global_step": self.global_step,
+            "val_loss": self.val_loss,
+            "best_loss": self.best_loss,
+        }
 
-        if math.isnan(float(best_loss)):
-            raise ValueError(
-                "Early stopping best_loss cannot be NaN."
-            )
+        if optimizer is not None:
+            objects["optimizer"] = optimizer
 
-        if (
-            isinstance(counter, bool)
-            or not isinstance(counter, int)
-            or counter < 0
-        ):
-            raise ValueError(
-                "Early stopping counter must be a non-negative integer."
-            )
+        self.checkpoint = tf.train.Checkpoint(**objects)
 
-        if not isinstance(early_stop, bool):
-            raise TypeError(
-                "Early stopping early_stop must be a boolean."
-            )
+        self.latest_manager = tf.train.CheckpointManager(
+            self.checkpoint,
+            str(self.latest_dir),
+            max_to_keep=3,
+            checkpoint_name="latest_checkpoint",
+        )
 
-    # =====================================================
-    # Save Checkpoint
-    # =====================================================
+        self.best_manager = tf.train.CheckpointManager(
+            self.checkpoint,
+            str(self.best_dir),
+            max_to_keep=1,
+            checkpoint_name="best_model",
+        )
+
+    def update_best(self, val_loss):
+        self._validate_finite_number(val_loss, "val_loss")
+
+        if float(val_loss) < self.best_val_loss:
+            self.best_val_loss = float(val_loss)
+            self.best_loss.assign(self.best_val_loss)
+            return True
+
+        return False
 
     def save_checkpoint(
         self,
@@ -132,164 +112,73 @@ class CheckpointManager:
         early_stopping_state=None,
         save_best_only=True,
     ):
-        """
-        Save a complete training checkpoint.
+        if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 0:
+            raise ValueError("epoch must be a non-negative integer.")
 
-        Args:
-            model: Model being trained.
-            optimizer: Optimizer instance or None.
-            scheduler: Scheduler instance or None.
-            epoch: Current zero-based epoch index.
-            val_loss: Current validation loss.
-            global_step: Total optimizer update steps.
-            config: Training configuration.
-            is_best: Whether validation improved.
-            early_stopping_state: Optional early stopping state.
-            save_best_only: If False, save an additional
-                checkpoint for every epoch.
+        if not isinstance(global_step, int) or isinstance(global_step, bool) or global_step < 0:
+            raise ValueError("global_step must be a non-negative integer.")
 
-        Returns:
-            Path to the latest checkpoint.
-        """
+        self._validate_finite_number(val_loss, "val_loss")
+        self._validate_early_stopping_state(early_stopping_state)
 
-        if (
-            isinstance(epoch, bool)
-            or not isinstance(epoch, int)
-            or epoch < 0
-        ):
-            raise ValueError(
-                "epoch must be a non-negative integer."
-            )
+        if self.checkpoint is None:
+            self._build_managers(model, optimizer)
 
-        self._validate_finite_number(
-            val_loss,
-            "val_loss",
-        )
+        self.epoch.assign(epoch)
+        self.global_step.assign(global_step)
+        self.val_loss.assign(float(val_loss))
 
-        if (
-            isinstance(global_step, bool)
-            or not isinstance(global_step, int)
-            or global_step < 0
-        ):
-            raise ValueError(
-                "global_step must be a non-negative integer."
-            )
-
-        if not isinstance(is_best, bool):
-            raise TypeError(
-                "is_best must be a boolean."
-            )
-
-        if not isinstance(save_best_only, bool):
-            raise TypeError(
-                "save_best_only must be a boolean."
-            )
-
-        self._validate_early_stopping_state(
-            early_stopping_state
-        )
-
-        # Update best validation loss before building
-        # the checkpoint dictionary.
         if is_best:
             self.best_val_loss = float(val_loss)
+            self.best_loss.assign(self.best_val_loss)
 
-        # Convert configuration into a serializable dictionary.
-        if config is not None and hasattr(config, "to_dict"):
-            config_data = config.to_dict()
-        else:
-            config_data = config
+        latest_path = self.latest_manager.save(
+            checkpoint_number=epoch + 1
+        )
 
-        checkpoint = {
+        config_data = config.to_dict() if hasattr(config, "to_dict") else config
+
+        metadata = {
             "epoch": epoch,
-
-            "model_state_dict": model.state_dict(),
-
-            "optimizer_state_dict": (
-                optimizer.state_dict()
-                if optimizer is not None
-                else None
-            ),
-
-            "scheduler_state_dict": (
-                scheduler.state_dict()
-                if scheduler is not None
-                else None
-            ),
-
             "val_loss": float(val_loss),
-
             "best_val_loss": float(self.best_val_loss),
-
             "global_step": global_step,
-
             "config": config_data,
-
             "early_stopping_state": early_stopping_state,
         }
 
-        # -------------------------------------------------
-        # Always save latest checkpoint.
-        # This is required for reliable training resumption.
-        # -------------------------------------------------
+        metadata_path = latest_path + ".json"
+        with open(metadata_path, "w", encoding="utf-8") as file:
+            json.dump(metadata, file, indent=4, default=str)
 
-        checkpoint_path = (
-            self.checkpoint_dir / "latest_checkpoint.pth"
-        )
-
-        torch.save(
-            checkpoint,
-            checkpoint_path,
-        )
-
-        print(
-            f"Checkpoint saved: {checkpoint_path}"
-        )
-
-        # -------------------------------------------------
-        # Save best model only when validation improves.
-        # -------------------------------------------------
+        print(f"Latest checkpoint saved: {latest_path}")
 
         if is_best:
-
-            best_path = (
-                self.checkpoint_dir / "best_model.pth"
+            best_path = self.best_manager.save(
+                checkpoint_number=epoch + 1
             )
 
-            torch.save(
-                checkpoint,
-                best_path,
-            )
+            with open(best_path + ".json", "w", encoding="utf-8") as file:
+                json.dump(metadata, file, indent=4, default=str)
 
-            print(
-                f"Best model saved: {best_path}"
-            )
-
-        # -------------------------------------------------
-        # Optional per-epoch checkpoints.
-        # -------------------------------------------------
+            print(f"Best checkpoint saved: {best_path}")
 
         if not save_best_only:
+            epoch_dir = self.checkpoint_dir / f"epoch_{epoch + 1}"
+            epoch_dir.mkdir(parents=True, exist_ok=True)
 
-            epoch_path = (
-                self.checkpoint_dir
-                / f"checkpoint_epoch_{epoch + 1}.pth"
+            epoch_checkpoint = tf.train.Checkpoint(
+                model=model,
+                optimizer=optimizer,
+                epoch=self.epoch,
+                global_step=self.global_step,
+                val_loss=self.val_loss,
+                best_loss=self.best_loss,
             )
 
-            torch.save(
-                checkpoint,
-                epoch_path,
-            )
+            epoch_checkpoint.write(str(epoch_dir / "checkpoint"))
 
-            print(
-                f"Epoch checkpoint saved: {epoch_path}"
-            )
-
-        return checkpoint_path
-
-    # =====================================================
-    # Load Checkpoint
-    # =====================================================
+        return latest_path
 
     def load_checkpoint(
         self,
@@ -297,179 +186,54 @@ class CheckpointManager:
         model,
         optimizer=None,
         scheduler=None,
-        map_location="cpu",
+        map_location=None,
     ):
-        """
-        Restore model and training states.
+        path = Path(checkpoint_path)
 
-        Returns:
-            Dictionary containing:
-                - epoch
-                - val_loss
-                - best_val_loss
-                - global_step
-                - config
-                - early_stopping_state
-        """
+        if path.is_dir():
+            latest = tf.train.latest_checkpoint(str(path))
+            if latest is None:
+                raise FileNotFoundError(f"No TensorFlow checkpoint found in: {path}")
+            checkpoint_prefix = latest
+        else:
+            checkpoint_prefix = str(path)
 
-        checkpoint_path = Path(checkpoint_path)
+            if not (
+                Path(checkpoint_prefix + ".index").is_file()
+                or Path(checkpoint_prefix).is_file()
+            ):
+                raise FileNotFoundError(
+                    f"Checkpoint not found: {checkpoint_prefix}"
+                )
 
-        if not checkpoint_path.is_file():
-            raise FileNotFoundError(
-                f"Checkpoint not found: {checkpoint_path}"
-            )
+        if self.checkpoint is None:
+            self._build_managers(model, optimizer)
 
-        checkpoint = torch.load(
-            checkpoint_path,
-            map_location=map_location,
-            weights_only=True,
-        )
+        status = self.checkpoint.restore(checkpoint_prefix)
+        status.expect_partial()
 
-        if not isinstance(checkpoint, dict):
-            raise TypeError(
-                "Invalid checkpoint format."
-            )
+        metadata_path = checkpoint_prefix + ".json"
 
-        required_keys = {
-            "epoch",
-            "model_state_dict",
-            "val_loss",
-            "best_val_loss",
-            "global_step",
-        }
+        if Path(metadata_path).is_file():
+            with open(metadata_path, "r", encoding="utf-8") as file:
+                metadata = json.load(file)
+        else:
+            metadata = {
+                "epoch": int(self.epoch.numpy()),
+                "val_loss": float(self.val_loss.numpy()),
+                "best_val_loss": float(self.best_loss.numpy()),
+                "global_step": int(self.global_step.numpy()),
+                "config": None,
+                "early_stopping_state": None,
+            }
 
-        missing_keys = required_keys - checkpoint.keys()
+        self.best_val_loss = float(metadata["best_val_loss"])
 
-        if missing_keys:
-            raise KeyError(
-                f"Invalid checkpoint. Missing keys: {missing_keys}"
-            )
+        print(f"Checkpoint restored: {checkpoint_prefix}")
+        print(f"Resuming from epoch: {metadata['epoch'] + 1}")
 
-        # Validate checkpoint metadata before restoring.
-        epoch = checkpoint["epoch"]
-        global_step = checkpoint["global_step"]
-
-        if (
-            isinstance(epoch, bool)
-            or not isinstance(epoch, int)
-            or epoch < 0
-        ):
-            raise ValueError(
-                "Invalid checkpoint epoch."
-            )
-
-        if (
-            isinstance(global_step, bool)
-            or not isinstance(global_step, int)
-            or global_step < 0
-        ):
-            raise ValueError(
-                "Invalid checkpoint global_step."
-            )
-
-        self._validate_finite_number(
-            checkpoint["val_loss"],
-            "checkpoint val_loss",
-        )
-
-        best_val_loss = checkpoint["best_val_loss"]
-
-        if (
-            isinstance(best_val_loss, bool)
-            or not isinstance(best_val_loss, (int, float))
-        ):
-            raise TypeError(
-                "Checkpoint best_val_loss must be numeric."
-            )
-
-        if math.isnan(float(best_val_loss)):
-            raise ValueError(
-                "Checkpoint best_val_loss cannot be NaN."
-            )
-
-        early_stopping_state = checkpoint.get(
-            "early_stopping_state"
-        )
-
-        self._validate_early_stopping_state(
-            early_stopping_state
-        )
-
-        # Restore model.
-        model.load_state_dict(
-            checkpoint["model_state_dict"]
-        )
-
-        # Restore optimizer.
-        if (
-            optimizer is not None
-            and checkpoint.get("optimizer_state_dict") is not None
-        ):
-            optimizer.load_state_dict(
-                checkpoint["optimizer_state_dict"]
-            )
-
-        # Restore scheduler.
-        if (
-            scheduler is not None
-            and checkpoint.get("scheduler_state_dict") is not None
-        ):
-            scheduler.load_state_dict(
-                checkpoint["scheduler_state_dict"]
-            )
-
-        self.best_val_loss = float(best_val_loss)
-
-        print(
-            f"Checkpoint loaded: {checkpoint_path}"
-        )
-
-        print(
-            f"Resuming from epoch: {epoch + 1}"
-        )
-
-        print(
-            f"Best validation loss: {self.best_val_loss:.4f}"
-        )
-
-        return {
-            "epoch": epoch,
-            "val_loss": checkpoint["val_loss"],
-            "best_val_loss": self.best_val_loss,
-            "global_step": global_step,
-            "config": checkpoint.get("config"),
-            "early_stopping_state": early_stopping_state,
-        }
-
-    # =====================================================
-    # Best Validation Loss
-    # =====================================================
-
-    def update_best(self, val_loss):
-        """
-        Check whether the current validation loss is the best.
-        """
-
-        self._validate_finite_number(
-            val_loss,
-            "val_loss",
-        )
-
-        if val_loss < self.best_val_loss:
-
-            self.best_val_loss = float(val_loss)
-
-            return True
-
-        return False
+        return metadata
 
 
 if __name__ == "__main__":
-
-    print(
-        "CheckpointManager module imported successfully."
-    )
-
-    print(
-        "Use CheckpointManager() to save and load checkpoints."
-    )
+    print("TensorFlow CheckpointManager module imported successfully.")
