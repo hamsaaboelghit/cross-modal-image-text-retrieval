@@ -7,21 +7,14 @@ from src.evaluation.retrieval_evaluator import RetrievalEvaluator
 
 
 class DummyRetrievalModel(tf.keras.Model):
-    """
-    Lightweight deterministic model.
-
-    It is used to test the evaluator without loading ResNet50
-    or training a real retrieval model.
-    """
+    """Lightweight deterministic model for evaluator tests."""
 
     def call(self, images, captions, training=None):
-        # Images are constant-colored in this test.
         image_embeddings = tf.reduce_mean(
             images,
             axis=(1, 2),
         )[:, :2]
 
-        # The first two token IDs represent the text embedding.
         flat_captions = tf.reshape(
             captions,
             (-1, tf.shape(captions)[-1]),
@@ -74,6 +67,7 @@ class TestRetrievalEvaluator(unittest.TestCase):
             [
                 tf.ones((1, 224, 224, 3))
                 * tf.constant([1.0, 0.0, 0.0]),
+
                 tf.ones((1, 224, 224, 3))
                 * tf.constant([0.0, 1.0, 0.0]),
             ],
@@ -116,25 +110,33 @@ class TestRetrievalEvaluator(unittest.TestCase):
 
     def test_evaluator_initialization(self):
         self.assertIsNotNone(self.evaluator)
-        self.assertIs(self.evaluator.model, self.model)
+        self.assertIs(
+            self.evaluator.model,
+            self.model,
+        )
 
     def test_extract_embeddings(self):
         dataset = self.create_dataset()
 
-        extracted = self.evaluator.extract_embeddings(
-            dataset
-        )
-
-        # The evaluator should extract one image embedding
-        # and five caption embeddings for each image.
-        self.assertEqual(
-            tuple(extracted["image_embeddings"].shape),
-            (2, 512),
-        )
+        (
+            image_embeddings,
+            text_embeddings,
+            image_names,
+        ) = self.evaluator.extract_embeddings(dataset)
 
         self.assertEqual(
-            tuple(extracted["text_embeddings"].shape),
-            (2, 5, 512),
+            tuple(image_embeddings.shape),
+            (2, 2),
+        )
+
+        self.assertEqual(
+            tuple(text_embeddings.shape),
+            (2, 5, 2),
+        )
+
+        self.assertEqual(
+            image_names,
+            ["image_1.jpg", "image_2.jpg"],
         )
 
     def test_evaluate_both_retrieval_directions(self):
@@ -182,16 +184,41 @@ class TestRetrievalEvaluator(unittest.TestCase):
             places=5,
         )
 
+        self.assertAlmostEqual(
+            results["text_to_image"]["mrr"],
+            1.0,
+            places=5,
+        )
+
+        self.assertAlmostEqual(
+            results["image_to_text"]["mrr"],
+            1.0,
+            places=5,
+        )
+
     def test_model_is_not_updated_during_evaluation(self):
         dataset = self.create_dataset()
 
+        original_weights = [
+            weight.numpy().copy()
+            for weight in self.model.weights
+        ]
+
         self.evaluator.evaluate(dataset)
 
-        # Evaluation must not change trainable weights.
         self.assertEqual(
-            len(self.model.trainable_variables),
-            0,
+            len(self.model.weights),
+            len(original_weights),
         )
+
+        for original, current in zip(
+            original_weights,
+            self.model.weights,
+        ):
+            tf.debugging.assert_near(
+                original,
+                current,
+            )
 
     def test_invalid_constructor_arguments(self):
         with self.assertRaises((ValueError, TypeError)):
@@ -204,6 +231,44 @@ class TestRetrievalEvaluator(unittest.TestCase):
             RetrievalEvaluator(
                 model=self.model,
                 candidate_chunk_size=0,
+            )
+
+        with self.assertRaises((ValueError, TypeError)):
+            RetrievalEvaluator(
+                model=self.model,
+                ks=(),
+            )
+
+    def test_duplicate_image_names_are_rejected(self):
+        dataset = self.create_dataset()
+
+        duplicate_dataset = tf.data.Dataset.from_tensor_slices(
+            {
+                "image": tf.concat(
+                    [
+                        tf.ones((1, 224, 224, 3))
+                        * tf.constant([1.0, 0.0, 0.0]),
+                        tf.ones((1, 224, 224, 3))
+                        * tf.constant([0.0, 1.0, 0.0]),
+                    ],
+                    axis=0,
+                ),
+                "captions": tf.constant(
+                    [
+                        [[1, 0] + [0] * 32] * 5,
+                        [[0, 1] + [0] * 32] * 5,
+                    ],
+                    dtype=tf.int32,
+                ),
+                "image_name": tf.constant(
+                    ["same.jpg", "same.jpg"]
+                ),
+            }
+        ).batch(2)
+
+        with self.assertRaises(ValueError):
+            self.evaluator.extract_embeddings(
+                duplicate_dataset
             )
 
 

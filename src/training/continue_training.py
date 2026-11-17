@@ -2,7 +2,6 @@
 import json
 from pathlib import Path
 
-import numpy as np
 import tensorflow as tf
 
 from src.data.flickr30k_dataset import Flickr30kDataset
@@ -10,7 +9,7 @@ from src.models.full_model import CrossModalRetrievalModel
 from src.training.contrastive_loss import MultiPositiveInfoNCELoss
 from src.training.train_config import TrainingConfig
 from src.training.trainer import Trainer
-from src.training.evaluator import Evaluator
+from src.training.checkpoint_manager import CheckpointManager
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -46,11 +45,16 @@ def load_vocabulary():
             f"Vocabulary not found: {VOCAB_PATH}"
         )
 
-    with VOCAB_PATH.open("r", encoding="utf-8") as file:
+    with VOCAB_PATH.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
         vocabulary = json.load(file)
 
     if not isinstance(vocabulary, dict):
-        raise TypeError("Vocabulary must be a dictionary.")
+        raise TypeError(
+            "Vocabulary must be a dictionary."
+        )
 
     return vocabulary
 
@@ -70,7 +74,6 @@ def build_model(vocab_size):
         use_cross_modal_attention=False,
     )
 
-    # Create all model variables before checkpoint restoration.
     dummy_images = tf.zeros(
         (1, 224, 224, 3),
         dtype=tf.float32,
@@ -112,8 +115,13 @@ def main():
         split="validation",
     )
 
-    print(f"Training images: {len(train_data):,}")
-    print(f"Validation images: {len(validation_data):,}")
+    print(
+        f"Training images: {len(train_data):,}"
+    )
+
+    print(
+        f"Validation images: {len(validation_data):,}"
+    )
 
     train_dataset = train_data.as_dataset(
         batch_size=BATCH_SIZE,
@@ -142,7 +150,9 @@ def main():
         fold=FOLD,
         device="auto",
         checkpoint_dir=str(CHECKPOINT_DIR),
-        log_dir="runs/real_fold1",
+        log_dir=str(
+            PROJECT_ROOT / "runs" / "real_fold1"
+        ),
         save_best_only=True,
     )
 
@@ -160,151 +170,64 @@ def main():
         config=config,
     )
 
-    evaluator = Evaluator(
-        model=model,
-        loss_fn=loss_fn,
-        config=config,
-    )
-
     CHECKPOINT_DIR.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    # Keep the checkpoint root names consistent with evaluation_runner.py.
-    epoch_variable = tf.Variable(
-        0,
-        dtype=tf.int64,
-        trainable=False,
-        name="epoch",
+    checkpoint_manager = CheckpointManager(
+        str(CHECKPOINT_DIR)
     )
 
-    global_step_variable = tf.Variable(
-        0,
-        dtype=tf.int64,
-        trainable=False,
-        name="global_step",
+    latest_checkpoint = tf.train.latest_checkpoint(
+        str(CHECKPOINT_DIR / "latest")
     )
 
-    best_val_loss_variable = tf.Variable(
-        float("inf"),
-        dtype=tf.float32,
-        trainable=False,
-        name="best_val_loss",
-    )
+    if latest_checkpoint is not None:
+        resume_from = str(CHECKPOINT_DIR)
 
-    checkpoint = tf.train.Checkpoint(
-        model=model,
-        optimizer=trainer.optimizer,
-        epoch=epoch_variable,
-        global_step=global_step_variable,
-        best_val_loss=best_val_loss_variable,
-    )
-
-    latest_manager = tf.train.CheckpointManager(
-        checkpoint,
-        str(CHECKPOINT_DIR),
-        max_to_keep=3,
-        checkpoint_name="ckpt",
-    )
-
-    best_manager = tf.train.CheckpointManager(
-        checkpoint,
-        str(CHECKPOINT_DIR / "best"),
-        max_to_keep=1,
-        checkpoint_name="best",
-    )
-
-    latest_path = latest_manager.latest_checkpoint
-
-    if latest_path:
-        print(f"\nRestoring training state: {latest_path}")
-
-        status = checkpoint.restore(latest_path)
-        status.expect_partial()
-
-        start_epoch = int(epoch_variable.numpy())
-        best_val_loss = float(best_val_loss_variable.numpy())
-
-        trainer.global_step = int(
-            global_step_variable.numpy()
+        print(
+            f"\nCheckpoint found: {latest_checkpoint}"
         )
 
-        print(f"Resuming after epoch: {start_epoch}")
-        print(f"Previous best validation loss: {best_val_loss:.6f}")
-        print(f"Restored global step: {trainer.global_step}")
+        print(
+            "Training will resume from the saved state."
+        )
 
     else:
-        start_epoch = 0
-        best_val_loss = float("inf")
+        resume_from = None
 
-        print("\nNo TensorFlow checkpoint found.")
+        print("\nNo checkpoint found.")
         print("Starting a new training run.")
 
-    if start_epoch >= TOTAL_EPOCHS:
-        print(
-            f"\nTraining already reached {TOTAL_EPOCHS} epochs."
-        )
-        return
-
-    print("\nStarting training...")
-
-    for epoch in range(start_epoch, TOTAL_EPOCHS):
-        print("\n" + "=" * 65)
-        print(f"EPOCH {epoch + 1}/{TOTAL_EPOCHS}")
-        print("=" * 65)
-
-        train_loss = trainer.train_epoch(train_dataset)
-
-        validation_results = evaluator.evaluate(
-            validation_dataset
-        )
-
-        val_loss = float(validation_results["val_loss"])
-
-        if not np.isfinite(train_loss):
-            raise FloatingPointError(
-                f"Non-finite training loss at epoch {epoch + 1}."
-            )
-
-        if not np.isfinite(val_loss):
-            raise FloatingPointError(
-                f"Non-finite validation loss at epoch {epoch + 1}."
-            )
-
-        print(f"\nTraining loss: {train_loss:.6f}")
-        print(f"Validation loss: {val_loss:.6f}")
-
-        epoch_variable.assign(epoch + 1)
-        global_step_variable.assign(trainer.global_step)
-
-        improved = val_loss < best_val_loss
-
-        if improved:
-            best_val_loss = val_loss
-            best_val_loss_variable.assign(best_val_loss)
-
-        latest_path = latest_manager.save(
-            checkpoint_number=epoch + 1
-        )
-
-        print(f"Latest checkpoint saved: {latest_path}")
-
-        if improved:
-            best_path = best_manager.save(
-                checkpoint_number=epoch + 1
-            )
-
-            print(f"New best checkpoint saved: {best_path}")
-
-        print(f"Global step: {trainer.global_step}")
-        print(f"Best validation loss: {best_val_loss:.6f}")
+    history = trainer.fit(
+        train_loader=train_dataset,
+        epochs=TOTAL_EPOCHS,
+        val_loader=validation_dataset,
+        checkpoint_manager=checkpoint_manager,
+        resume_from=resume_from,
+    )
 
     print("\n" + "=" * 65)
-    print("CONTINUED TRAINING COMPLETED")
+    print("TRAINING COMPLETED")
     print("=" * 65)
-    print(f"Best validation loss: {best_val_loss:.6f}")
-    print(f"Checkpoint directory: {CHECKPOINT_DIR}")
+
+    if history["train_loss"]:
+        print(
+            f"Final training loss: "
+            f"{history['train_loss'][-1]:.6f}"
+        )
+
+    if history["val_loss"]:
+        print(
+            f"Final validation loss: "
+            f"{history['val_loss'][-1]:.6f}"
+        )
+
+    print(
+        f"Checkpoint directory: {CHECKPOINT_DIR}"
+    )
+
     print("Test split was NOT used.")
 
 

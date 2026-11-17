@@ -23,6 +23,8 @@ VOCAB_PATH = (
 IMAGE_SIZE = 224
 MAX_LENGTH = 34
 NUM_CAPTIONS = 5
+FOLD = 1
+SEED = 42
 
 
 EXPERIMENTS = {
@@ -75,11 +77,30 @@ def load_vocabulary():
             f"Vocabulary file not found: {VOCAB_PATH}"
         )
 
-    with VOCAB_PATH.open("r", encoding="utf-8") as file:
+    with VOCAB_PATH.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
         vocabulary = json.load(file)
 
     if not isinstance(vocabulary, dict):
-        raise TypeError("Vocabulary must be a dictionary.")
+        raise TypeError(
+            "Vocabulary must be a dictionary."
+        )
+
+    required_tokens = {
+        "<PAD>",
+        "<UNK>",
+        "<BOS>",
+        "<EOS>",
+    }
+
+    missing = required_tokens - vocabulary.keys()
+
+    if missing:
+        raise ValueError(
+            f"Vocabulary is missing special tokens: {missing}"
+        )
 
     return vocabulary
 
@@ -101,7 +122,7 @@ def build_model(vocab_size, config):
         ],
     )
 
-    # Build variables before restoring checkpoint weights.
+    # Build all variables before restoring the checkpoint.
     dummy_images = tf.zeros(
         (1, IMAGE_SIZE, IMAGE_SIZE, 3),
         dtype=tf.float32,
@@ -121,8 +142,14 @@ def build_model(vocab_size, config):
     return model
 
 
+def resolve_checkpoint(checkpoint_dir, checkpoint_kind="best"):
+    """
+    Resolve a checkpoint from:
+      - experiment root containing best/ and latest/
+      - direct best/ or latest/ directory
+      - direct TensorFlow checkpoint prefix
+    """
 
-def resolve_checkpoint(checkpoint_dir):
     checkpoint_dir = Path(checkpoint_dir)
 
     if not checkpoint_dir.is_absolute():
@@ -130,86 +157,139 @@ def resolve_checkpoint(checkpoint_dir):
 
     if not checkpoint_dir.exists():
         raise FileNotFoundError(
-            f"Checkpoint directory not found: {checkpoint_dir}"
+            f"Checkpoint path does not exist: {checkpoint_dir}"
         )
 
-    # Prefer the best validation checkpoint.
-    best_dir = checkpoint_dir / "best"
+    if checkpoint_dir.is_file():
+        checkpoint_path = str(checkpoint_dir)
 
-    if best_dir.is_dir():
-        best_path = tf.train.latest_checkpoint(
-            str(best_dir)
-        )
+        if checkpoint_path.endswith(".index"):
+            checkpoint_path = checkpoint_path[:-6]
 
-        if best_path is not None:
-            return best_path
+        if not Path(checkpoint_path + ".index").is_file():
+            raise FileNotFoundError(
+                f"Invalid TensorFlow checkpoint prefix: {checkpoint_path}"
+            )
 
-    # Fall back to the latest training checkpoint.
-    checkpoint_path = tf.train.latest_checkpoint(
+        return checkpoint_path
+
+    # If the supplied path is itself a checkpoint directory.
+    direct_checkpoint = tf.train.latest_checkpoint(
         str(checkpoint_dir)
     )
 
-    if checkpoint_path is None:
-        raise FileNotFoundError(
-            "No TensorFlow checkpoint found in "
-            f"{checkpoint_dir}"
+    if direct_checkpoint is not None:
+        return direct_checkpoint
+
+    if checkpoint_kind not in {"best", "latest"}:
+        raise ValueError(
+            "checkpoint_kind must be 'best' or 'latest'."
         )
 
-    return checkpoint_path
+    preferred = [
+        checkpoint_kind,
+        "latest" if checkpoint_kind == "best" else "best",
+    ]
 
+    for kind in preferred:
+        candidate_dir = checkpoint_dir / kind
+
+        if not candidate_dir.is_dir():
+            continue
+
+        checkpoint_path = tf.train.latest_checkpoint(
+            str(candidate_dir)
+        )
+
+        if checkpoint_path is not None:
+            return checkpoint_path
+
+    raise FileNotFoundError(
+        "No TensorFlow checkpoint found.\n"
+        f"Experiment directory: {checkpoint_dir}\n"
+        f"Checked directories: {preferred}"
+    )
 
 
 def restore_model(model, checkpoint_path):
-    checkpoint = tf.train.Checkpoint(model=model)
+    checkpoint = tf.train.Checkpoint(
+        model=model,
+    )
 
-    status = checkpoint.restore(checkpoint_path)
+    status = checkpoint.restore(
+        checkpoint_path
+    )
 
-    # Optimizer and training-state values may exist in the
-    # training checkpoint but are not needed for evaluation.
+    # The training checkpoint may also contain optimizer and state variables.
     status.expect_partial()
 
     return model
 
 
-def load_checkpoint_metadata(checkpoint_dir):
+def load_checkpoint_metadata(checkpoint_path):
     """
-    Read optional metadata if the checkpoint manager saved it.
-
-    Metadata is optional because the evaluator must not depend
-    on a particular JSON filename or training logger format.
+    Metadata is saved beside the checkpoint prefix:
+        latest_checkpoint-5.json
+        best_model-5.json
     """
 
-    checkpoint_dir = Path(checkpoint_dir)
+    metadata_path = Path(
+        str(checkpoint_path) + ".json"
+    )
 
-    if not checkpoint_dir.is_absolute():
-        checkpoint_dir = PROJECT_ROOT / checkpoint_dir
+    if not metadata_path.is_file():
+        print(
+            "Warning: No metadata file found for this checkpoint."
+        )
+        return {}
 
-    possible_names = [
-        "metadata.json",
-        "checkpoint_metadata.json",
-        "training_state.json",
-    ]
+    try:
+        with metadata_path.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
+            metadata = json.load(file)
 
-    for filename in possible_names:
-        metadata_path = checkpoint_dir / filename
+        if not isinstance(metadata, dict):
+            raise ValueError(
+                "Checkpoint metadata must be a JSON object."
+            )
 
-        if metadata_path.is_file():
-            try:
-                with metadata_path.open(
-                    "r",
-                    encoding="utf-8",
-                ) as file:
-                    data = json.load(file)
+        return metadata
 
-                if isinstance(data, dict):
-                    return data
+    except (json.JSONDecodeError, OSError) as error:
+        print(
+            f"Warning: Could not read checkpoint metadata: {error}"
+        )
+        return {}
 
-            except (json.JSONDecodeError, OSError):
-                print(
-                    f"Warning: Could not read {metadata_path}"
-                )
 
-    return {}
+def _to_json_safe(value):
+    if isinstance(value, dict):
+        return {
+            str(key): _to_json_safe(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, (list, tuple)):
+        return [
+            _to_json_safe(item)
+            for item in value
+        ]
+
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except (ValueError, TypeError):
+            pass
+
+    if isinstance(value, Path):
+        return str(value)
+
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+
+    return str(value)
 
 
 def save_results(
@@ -218,43 +298,42 @@ def save_results(
     checkpoint_path,
     checkpoint_metadata,
 ):
-    output_dir = PROJECT_ROOT / config["output_dir"]
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = (
+        PROJECT_ROOT / config["output_dir"]
+    )
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     clean_results = {
         key: value
         for key, value in results.items()
-        if key not in {"image_names", "names"}
+        if key not in {
+            "image_names",
+            "names",
+        }
     }
 
-    serializable_results = {}
-
-    for key, value in clean_results.items():
-        if isinstance(value, dict):
-            serializable_results[key] = {
-                metric: (
-                    float(metric_value)
-                    if isinstance(
-                        metric_value,
-                        (int, float),
-                    )
-                    else metric_value
-                )
-                for metric, metric_value in value.items()
-            }
-        elif isinstance(value, (int, float)):
-            serializable_results[key] = float(value)
-        else:
-            serializable_results[key] = value
+    serializable_results = _to_json_safe(
+        clean_results
+    )
 
     serializable_results.update({
         "model_type": config["model_name"],
+        "encoder_type": config["encoder_type"],
+        "use_cross_modal_attention": config[
+            "use_cross_modal_attention"
+        ],
         "checkpoint_path": str(checkpoint_path),
+        "checkpoint_metadata": _to_json_safe(
+            checkpoint_metadata
+        ),
         "split": "validation",
-        "fold": 1,
-        "seed": 42,
+        "fold": FOLD,
+        "seed": SEED,
         "test_set_used": False,
-        "checkpoint_metadata": checkpoint_metadata,
     })
 
     output_path = (
@@ -272,13 +351,23 @@ def save_results(
             ensure_ascii=False,
         )
 
-    print(f"\nResults saved to: {output_path}")
+    print(
+        f"\nResults saved to: {output_path}"
+    )
+
+    return output_path
 
 
-def run_evaluation(experiment_name):
+def run_evaluation(
+    experiment_name,
+    checkpoint_kind="best",
+):
     if experiment_name not in EXPERIMENTS:
+        available = ", ".join(EXPERIMENTS.keys())
+
         raise ValueError(
-            f"Unknown experiment: {experiment_name}"
+            f"Unknown experiment '{experiment_name}'. "
+            f"Available experiments: {available}"
         )
 
     config = EXPERIMENTS[experiment_name]
@@ -292,12 +381,15 @@ def run_evaluation(experiment_name):
     print("\nLoading vocabulary...")
     vocabulary = load_vocabulary()
 
-    print("Vocabulary size:", len(vocabulary))
+    print(
+        "Vocabulary size:",
+        len(vocabulary),
+    )
 
     print("\nLoading validation dataset...")
 
     validation_data = Flickr30kDataset(
-        fold_number=1,
+        fold_number=FOLD,
         split="validation",
     )
 
@@ -307,7 +399,10 @@ def run_evaluation(experiment_name):
         prefetch=True,
     )
 
-    print("Validation images:", len(validation_data))
+    print(
+        "Validation images:",
+        len(validation_data),
+    )
 
     print("\nBuilding TensorFlow model...")
 
@@ -319,10 +414,14 @@ def run_evaluation(experiment_name):
     print("\nResolving checkpoint...")
 
     checkpoint_path = resolve_checkpoint(
-        config["checkpoint_dir"]
+        config["checkpoint_dir"],
+        checkpoint_kind=checkpoint_kind,
     )
 
-    print("Checkpoint:", checkpoint_path)
+    print(
+        "Checkpoint:",
+        checkpoint_path,
+    )
 
     print("\nRestoring model weights...")
 
@@ -332,7 +431,7 @@ def run_evaluation(experiment_name):
     )
 
     checkpoint_metadata = load_checkpoint_metadata(
-        config["checkpoint_dir"]
+        checkpoint_path
     )
 
     print("\nInitializing Retrieval Evaluator...")
@@ -344,7 +443,9 @@ def run_evaluation(experiment_name):
         ks=(1, 5, 10),
     )
 
-    print("\nEvaluating on validation split...")
+    print(
+        "\nEvaluating on validation split..."
+    )
 
     results = evaluator.evaluate(
         validation_dataset
@@ -354,17 +455,21 @@ def run_evaluation(experiment_name):
     print("RETRIEVAL RESULTS")
     print("=" * 65)
 
-    for direction, metrics in results.items():
-        if isinstance(metrics, dict):
-            print(
-                f"\n{direction.upper().replace('_', ' ')}"
-            )
+    for direction in (
+        "text_to_image",
+        "image_to_text",
+    ):
+        metrics = results.get(direction, {})
 
-            for metric_name, value in metrics.items():
-                if isinstance(value, (int, float)):
-                    print(
-                        f"  {metric_name}: {value:.6f}"
-                    )
+        print(
+            f"\n{direction.upper().replace('_', ' ')}"
+        )
+
+        for metric_name, value in metrics.items():
+            if isinstance(value, (int, float)):
+                print(
+                    f"  {metric_name}: {value:.6f}"
+                )
 
     save_results(
         results=results,
@@ -377,3 +482,34 @@ def run_evaluation(experiment_name):
     print("Test split was NOT used.")
 
     return results
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Evaluate a VisionMatch image-text retrieval experiment."
+        )
+    )
+
+    parser.add_argument(
+        "--experiment",
+        type=str,
+        required=True,
+        choices=sorted(EXPERIMENTS.keys()),
+    )
+
+    parser.add_argument(
+        "--checkpoint-kind",
+        type=str,
+        default="best",
+        choices=["best", "latest"],
+    )
+
+    args = parser.parse_args()
+
+    run_evaluation(
+        experiment_name=args.experiment,
+        checkpoint_kind=args.checkpoint_kind,
+    )

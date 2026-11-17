@@ -37,19 +37,27 @@ class TestRetrievalMetrics(unittest.TestCase):
         )
 
         self.assertAlmostEqual(
-            results["recall@1"], 2 / 3, places=5
+            results["recall@1"],
+            2 / 3,
+            places=5,
         )
 
         self.assertAlmostEqual(
-            results["recall@2"], 1.0, places=5
+            results["recall@2"],
+            1.0,
+            places=5,
         )
 
         self.assertAlmostEqual(
-            results["recall@3"], 1.0, places=5
+            results["recall@3"],
+            1.0,
+            places=5,
         )
 
         self.assertAlmostEqual(
-            results["recall@5"], 1.0, places=5
+            results["recall@5"],
+            1.0,
+            places=5,
         )
 
     def test_mean_recall(self):
@@ -59,7 +67,9 @@ class TestRetrievalMetrics(unittest.TestCase):
             ks=(1, 2, 3),
         )
 
-        expected = (2 / 3 + 1.0 + 1.0) / 3
+        expected = (
+            2 / 3 + 1.0 + 1.0
+        ) / 3
 
         self.assertAlmostEqual(
             results["mean_recall"],
@@ -85,8 +95,10 @@ class TestRetrievalMetrics(unittest.TestCase):
             self.relevance,
         )
 
-        # First relevant ranks are 1, 2, and 2.
-        expected = (1.0 + 0.5 + 0.5) / 3
+        # First relevant ranks are 1, 2, and 1.
+        expected = (
+            1.0 + 0.5 + 1.0
+        ) / 3
 
         self.assertAlmostEqual(
             results["mrr"],
@@ -100,8 +112,15 @@ class TestRetrievalMetrics(unittest.TestCase):
             self.relevance,
         )
 
-        self.assertEqual(results["num_queries"], 3)
-        self.assertEqual(results["num_candidates"], 5)
+        self.assertEqual(
+            results["num_queries"],
+            3,
+        )
+
+        self.assertEqual(
+            results["num_candidates"],
+            5,
+        )
 
     def test_k_larger_than_candidates(self):
         results = compute_retrieval_metrics(
@@ -117,9 +136,17 @@ class TestRetrievalMetrics(unittest.TestCase):
         )
 
     def test_invalid_similarity_relevance_shape(self):
-        invalid_relevance = tf.zeros((3, 4))
+        invalid_relevance = tf.zeros(
+            (3, 4),
+            dtype=tf.int32,
+        )
 
-        with self.assertRaises((ValueError, tf.errors.InvalidArgumentError)):
+        with self.assertRaises(
+            (
+                ValueError,
+                tf.errors.InvalidArgumentError,
+            )
+        ):
             compute_retrieval_metrics(
                 self.similarity,
                 invalid_relevance,
@@ -132,7 +159,12 @@ class TestRetrievalMetrics(unittest.TestCase):
             updates=[0, 0],
         )
 
-        with self.assertRaises((ValueError, tf.errors.InvalidArgumentError)):
+        with self.assertRaises(
+            (
+                ValueError,
+                tf.errors.InvalidArgumentError,
+            )
+        ):
             compute_retrieval_metrics(
                 self.similarity,
                 invalid_relevance,
@@ -145,18 +177,59 @@ class TestRetrievalMetrics(unittest.TestCase):
             updates=[float("nan")],
         )
 
-        with self.assertRaises((ValueError, tf.errors.InvalidArgumentError)):
+        with self.assertRaises(
+            (
+                ValueError,
+                tf.errors.InvalidArgumentError,
+            )
+        ):
             compute_retrieval_metrics(
                 invalid_similarity,
                 self.relevance,
             )
 
     def test_empty_similarity_matrix(self):
-        with self.assertRaises((ValueError, tf.errors.InvalidArgumentError)):
+        with self.assertRaises(
+            (
+                ValueError,
+                tf.errors.InvalidArgumentError,
+            )
+        ):
             compute_retrieval_metrics(
                 tf.zeros((0, 5)),
                 tf.zeros((0, 5)),
             )
+
+    def test_stable_ranking_for_equal_scores(self):
+        similarity = tf.constant(
+            [[0.9, 0.9, 0.5]],
+            dtype=tf.float32,
+        )
+
+        relevance = tf.constant(
+            [[0, 1, 0]],
+            dtype=tf.int32,
+        )
+
+        results = compute_retrieval_metrics(
+            similarity,
+            relevance,
+            ks=(1, 2),
+        )
+
+        # Stable sorting preserves candidate order.
+        # The relevant candidate is ranked second.
+        self.assertAlmostEqual(
+            results["recall@1"],
+            0.0,
+            places=5,
+        )
+
+        self.assertAlmostEqual(
+            results["recall@2"],
+            1.0,
+            places=5,
+        )
 
 
 if __name__ == "__main__":

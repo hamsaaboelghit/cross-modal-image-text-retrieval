@@ -14,7 +14,10 @@ from src.models.baseline_model import BaselineRetrievalModel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-MODEL_TYPE = os.getenv("VISIONMATCH_MODEL_TYPE", "baseline").lower()
+MODEL_TYPE = os.getenv(
+    "VISIONMATCH_MODEL_TYPE",
+    "baseline",
+).strip().lower()
 
 CHECKPOINT_DIR = Path(
     os.getenv(
@@ -23,18 +26,28 @@ CHECKPOINT_DIR = Path(
             PROJECT_ROOT
             / "checkpoints"
             / "experiments"
-            / "baseline_fold1"
+            / "baseline_fold1_seed42"
         ),
     )
 )
 
-VOCAB_PATH = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-    / "flickr30k"
-    / "vocabularies"
-    / "fold_1_vocab.json"
+CHECKPOINT_KIND = os.getenv(
+    "VISIONMATCH_CHECKPOINT_KIND",
+    "best",
+).strip().lower()
+
+VOCAB_PATH = Path(
+    os.getenv(
+        "VISIONMATCH_VOCAB_PATH",
+        str(
+            PROJECT_ROOT
+            / "data"
+            / "processed"
+            / "flickr30k"
+            / "vocabularies"
+            / "fold_1_vocab.json"
+        ),
+    )
 )
 
 IMAGE_SIZE = 224
@@ -43,12 +56,13 @@ EMBEDDING_DIM = 512
 
 
 class ModelService:
+    """Load a trained VisionMatch model and generate embeddings."""
+
     def __init__(self):
         self.model = None
         self.vocabulary = None
         self.checkpoint_path = None
         self.checkpoint_info = {}
-
         self.model_type = MODEL_TYPE
 
     def _load_vocabulary(self):
@@ -57,13 +71,24 @@ class ModelService:
                 f"Vocabulary not found: {VOCAB_PATH}"
             )
 
-        with VOCAB_PATH.open("r", encoding="utf-8") as file:
+        with VOCAB_PATH.open(
+            "r",
+            encoding="utf-8",
+        ) as file:
             vocabulary = json.load(file)
 
         if not isinstance(vocabulary, dict):
-            raise TypeError("Vocabulary must be a dictionary.")
+            raise TypeError(
+                "Vocabulary must be a dictionary."
+            )
 
-        required_tokens = {"<PAD>", "<UNK>", "<BOS>", "<EOS>"}
+        required_tokens = {
+            "<PAD>",
+            "<UNK>",
+            "<BOS>",
+            "<EOS>",
+        }
+
         missing = required_tokens - vocabulary.keys()
 
         if missing:
@@ -71,26 +96,85 @@ class ModelService:
                 f"Vocabulary is missing special tokens: {missing}"
             )
 
+        token_ids = list(vocabulary.values())
+
+        if not all(
+            isinstance(token_id, int) and token_id >= 0
+            for token_id in token_ids
+        ):
+            raise ValueError(
+                "Vocabulary token IDs must be non-negative integers."
+            )
+
+        if len(set(token_ids)) != len(token_ids):
+            raise ValueError(
+                "Vocabulary contains duplicate token IDs."
+            )
+
         self.vocabulary = vocabulary
 
+    @staticmethod
+    def _checkpoint_from_directory(directory):
+        directory = Path(directory)
+
+        if not directory.is_dir():
+            return None
+
+        return tf.train.latest_checkpoint(str(directory))
+
     def _resolve_checkpoint(self):
-        if not CHECKPOINT_DIR.exists():
+        path = CHECKPOINT_DIR.expanduser()
+
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+
+        if not path.exists():
             raise FileNotFoundError(
-                f"Checkpoint directory not found: {CHECKPOINT_DIR}"
+                f"Checkpoint path does not exist: {path}"
             )
 
-        checkpoint_path = tf.train.latest_checkpoint(
-            str(CHECKPOINT_DIR)
+        # The environment variable may point directly to a checkpoint prefix.
+        if path.is_file() and str(path).endswith(".index"):
+            return str(path)[:-6]
+
+        if path.is_file():
+            return str(path)
+
+        # Or it may point to an experiment root, latest/, or best/.
+        if self._checkpoint_from_directory(path) is not None:
+            return self._checkpoint_from_directory(path)
+
+        if self.model_type == "baseline":
+            preferred_kinds = [CHECKPOINT_KIND, "best", "latest"]
+        else:
+            preferred_kinds = [CHECKPOINT_KIND, "best", "latest"]
+
+        checked = set()
+
+        for kind in preferred_kinds:
+            if kind in checked:
+                continue
+
+            checked.add(kind)
+
+            if kind not in {"best", "latest"}:
+                continue
+
+            candidate_dir = path / kind
+            checkpoint = self._checkpoint_from_directory(
+                candidate_dir
+            )
+
+            if checkpoint is not None:
+                return checkpoint
+
+        raise FileNotFoundError(
+            "No TensorFlow checkpoint was found.\n"
+            f"Checked: {path}\n"
+            f"Also checked: {path / 'best'} and {path / 'latest'}\n"
+            "Set VISIONMATCH_CHECKPOINT_DIR to the experiment "
+            "directory, a checkpoint directory, or a checkpoint prefix."
         )
-
-        if checkpoint_path is None:
-            raise FileNotFoundError(
-                "No TensorFlow checkpoint was found in "
-                f"{CHECKPOINT_DIR}. Make sure training has saved "
-                "at least one checkpoint."
-            )
-
-        return checkpoint_path
 
     def _build_model(self):
         vocab_size = len(self.vocabulary)
@@ -139,7 +223,7 @@ class ModelService:
                 f"Unsupported model type: {self.model_type}"
             )
 
-        # Build all model variables before restoring the checkpoint.
+        # Build model variables before restoring checkpoint weights.
         dummy_images = tf.zeros(
             (1, IMAGE_SIZE, IMAGE_SIZE, 3),
             dtype=tf.float32,
@@ -172,17 +256,22 @@ class ModelService:
         self.checkpoint_path = self._resolve_checkpoint()
 
         print("Restoring model weights...")
-        checkpoint = tf.train.Checkpoint(model=self.model)
 
-        status = checkpoint.restore(self.checkpoint_path)
+        checkpoint = tf.train.Checkpoint(
+            model=self.model,
+        )
 
-        # The training checkpoint may also contain optimizer and
-        # training-state variables. This service only needs the model.
+        status = checkpoint.restore(
+            self.checkpoint_path
+        )
+
+        # Training checkpoints can also contain optimizer and state variables.
         status.expect_partial()
 
         self.checkpoint_info = {
             "model_type": self.model_type,
             "checkpoint_path": self.checkpoint_path,
+            "checkpoint_kind": CHECKPOINT_KIND,
             "vocab_size": len(self.vocabulary),
             "embedding_dim": EMBEDDING_DIM,
         }
@@ -194,7 +283,10 @@ class ModelService:
         return self
 
     def _tokenize(self, caption):
-        if not isinstance(caption, str) or not caption.strip():
+        if (
+            not isinstance(caption, str)
+            or not caption.strip()
+        ):
             raise ValueError(
                 "Caption must be a non-empty string."
             )
@@ -216,7 +308,9 @@ class ModelService:
             for token in tokens
         )
 
-        encoded.append(self.vocabulary["<EOS>"])
+        encoded.append(
+            self.vocabulary["<EOS>"]
+        )
 
         if len(encoded) > MAX_LENGTH:
             encoded = encoded[:MAX_LENGTH]
@@ -235,13 +329,17 @@ class ModelService:
 
     def encode_caption(self, caption):
         if not self.is_loaded:
-            raise RuntimeError("Model service is not loaded.")
+            raise RuntimeError(
+                "Model service is not loaded."
+            )
 
         return self._tokenize(caption)
 
     def get_text_embedding(self, caption):
         if not self.is_loaded:
-            raise RuntimeError("Model service is not loaded.")
+            raise RuntimeError(
+                "Model service is not loaded."
+            )
 
         tokens = self._tokenize(caption)
 
@@ -263,9 +361,12 @@ class ModelService:
 
     def preprocess_image(self, image):
         if not isinstance(image, Image.Image):
-            raise TypeError("Expected a PIL Image.")
+            raise TypeError(
+                "Expected a PIL Image."
+            )
 
         image = image.convert("RGB")
+
         image = image.resize(
             (IMAGE_SIZE, IMAGE_SIZE),
             Image.Resampling.BILINEAR,
@@ -283,7 +384,9 @@ class ModelService:
 
     def get_image_embedding(self, image):
         if not self.is_loaded:
-            raise RuntimeError("Model service is not loaded.")
+            raise RuntimeError(
+                "Model service is not loaded."
+            )
 
         image_tensor = self.preprocess_image(image)
 
@@ -309,3 +412,12 @@ class ModelService:
             self.model is not None
             and self.vocabulary is not None
         )
+
+
+if __name__ == "__main__":
+    service = ModelService()
+    service.load()
+
+    print("\nModel service is ready.")
+    print("Loaded model:", service.model_type)
+    print("Checkpoint:", service.checkpoint_path)
