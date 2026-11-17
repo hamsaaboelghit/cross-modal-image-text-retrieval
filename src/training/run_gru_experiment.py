@@ -1,4 +1,5 @@
-﻿import json
+﻿
+import json
 import random
 import time
 from pathlib import Path
@@ -15,9 +16,7 @@ from src.training.trainer import Trainer
 from src.training.evaluator import Evaluator
 
 
-def main():
-    seed = 42
-
+def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -27,6 +26,17 @@ def main():
 
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+
+def main():
+    seed = 42
+    fold = 1
+
+    # Shared visual encoder configuration
+    pretrained = True
+    unfreeze_last_block = False
+
+    set_seed(seed)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -39,16 +49,21 @@ def main():
         print(f"GPU: {torch.cuda.get_device_name(0)}")
 
     vocab_path = Path(
-        "data/processed/flickr30k/vocabularies/fold_1_vocab.json"
+        f"data/processed/flickr30k/vocabularies/fold_{fold}_vocab.json"
     )
+
+    if not vocab_path.is_file():
+        raise FileNotFoundError(
+            f"Vocabulary file not found: {vocab_path}"
+        )
 
     with open(vocab_path, "r", encoding="utf-8") as file:
         vocabulary = json.load(file)
 
     vocab_size = len(vocabulary)
 
-    train_dataset = Flickr30kDataset(1, "train")
-    val_dataset = Flickr30kDataset(1, "validation")
+    train_dataset = Flickr30kDataset(fold, "train")
+    val_dataset = Flickr30kDataset(fold, "validation")
 
     config = TrainingConfig(
         epochs=5,
@@ -64,7 +79,7 @@ def main():
         pin_memory=(device == "cuda"),
         drop_last=False,
         seed=seed,
-        fold=1,
+        fold=fold,
         device=device,
     )
 
@@ -72,29 +87,40 @@ def main():
         train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
-        num_workers=0,
+        num_workers=config.num_workers,
         pin_memory=config.pin_memory,
+        drop_last=config.drop_last,
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=config.batch_size,
         shuffle=False,
-        num_workers=0,
+        num_workers=config.num_workers,
         pin_memory=config.pin_memory,
+        drop_last=False,
     )
+
+    model_config = {
+        "encoder_type": "gru",
+        "embedding_dim": 300,
+        "hidden_dim": 512,
+        "num_layers": 1,
+        "dropout": 0.2,
+        "bidirectional": False,
+        "use_attention": True,
+        "pretrained": pretrained,
+        "unfreeze_last_block": unfreeze_last_block,
+        "use_cross_modal_attention": False,
+    }
+
+    print("\nModel Configuration:")
+    for key, value in model_config.items():
+        print(f"{key}: {value}")
 
     model = CrossModalRetrievalModel(
         vocab_size=vocab_size,
-        encoder_type="gru",
-        embedding_dim=300,
-        hidden_dim=512,
-        num_layers=1,
-        dropout=0.2,
-        bidirectional=False,
-        use_attention=True,
-        pretrained=False,
-        unfreeze_last_block=False,
+        **model_config,
     )
 
     loss_fn = MultiPositiveInfoNCELoss(
@@ -114,7 +140,7 @@ def main():
     )
 
     output_dir = Path(
-        "checkpoints/experiments/gru_fold1_seed42"
+        f"checkpoints/experiments/gru_fold{fold}_seed{seed}_pretrained"
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -128,6 +154,7 @@ def main():
         start_time = time.time()
 
         train_loss = trainer.train_epoch(train_loader)
+
         validation = evaluator.evaluate(val_loader)
         val_loss = validation["val_loss"]
 
@@ -138,7 +165,9 @@ def main():
         print(f"Time: {elapsed:.2f} minutes")
 
         if not np.isfinite(train_loss) or not np.isfinite(val_loss):
-            raise RuntimeError("Non-finite loss detected. Experiment stopped.")
+            raise RuntimeError(
+                "Non-finite loss detected. Experiment stopped."
+            )
 
         checkpoint = {
             "epoch": epoch,
@@ -147,18 +176,28 @@ def main():
             "train_loss": train_loss,
             "val_loss": val_loss,
             "vocab_size": vocab_size,
-            "fold": 1,
+            "fold": fold,
             "model_type": "ResNet50-GRU",
+            "model_config": model_config,
+            "training_config": config.to_dict(),
             "encoder_type": "gru",
             "seed": seed,
             "global_step": trainer.global_step,
         }
 
-        torch.save(checkpoint, output_dir / f"epoch_{epoch}.pth")
+        torch.save(
+            checkpoint,
+            output_dir / f"epoch_{epoch}.pth",
+        )
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(checkpoint, output_dir / "best_model.pth")
+
+            torch.save(
+                checkpoint,
+                output_dir / "best_model.pth",
+            )
+
             print("New best checkpoint saved!")
 
     print("\n" + "=" * 60)

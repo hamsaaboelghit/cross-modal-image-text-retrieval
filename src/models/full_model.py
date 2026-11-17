@@ -1,6 +1,4 @@
-
-import torch
-import torch.nn as nn
+import tensorflow as tf
 
 try:
     from .image_encoder import ImageEncoder
@@ -14,7 +12,25 @@ except ImportError:
     from cross_modal_attention import CrossModalAttention
 
 
-class CrossModalRetrievalModel(nn.Module):
+class CrossModalRetrievalModel(tf.keras.Model):
+    """
+    Complete image-text retrieval model.
+
+    Image input:
+        [B, H, W, 3] RGB images in [0, 255].
+
+    Caption input:
+        [B, C, L] integer token IDs.
+
+    Main outputs:
+        image_embeddings: [B, 512]
+        text_embeddings: [B, C, 512]
+
+    Optional outputs:
+        matching_scores: [B, C]
+        attention_weights
+        cross_modal_attention_weights
+    """
 
     def __init__(
         self,
@@ -32,16 +48,16 @@ class CrossModalRetrievalModel(nn.Module):
         use_cross_modal_attention=False,
         cross_modal_num_heads=8,
         cross_modal_dropout=0.1,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
 
-        # 1. Image Encoder
         self.image_encoder = ImageEncoder(
             pretrained=pretrained,
             unfreeze_last_block=unfreeze_last_block,
+            name="image_encoder",
         )
 
-        # 2. Text Encoder
         self.text_encoder = TextEncoder(
             vocab_size=vocab_size,
             encoder_type=encoder_type,
@@ -51,232 +67,256 @@ class CrossModalRetrievalModel(nn.Module):
             dropout=dropout,
             bidirectional=bidirectional,
             use_attention=use_attention,
+            name="text_encoder",
         )
 
-        # 3. Independent Projection Heads
         self.projection = CrossModalProjection(
             image_dim=self.image_encoder.output_dim,
             text_dim=self.text_encoder.output_dim,
             embedding_dim=512,
             dropout=projection_dropout,
+            name="cross_modal_projection",
         )
 
         self.embedding_dim = 512
-
-        # 4. Optional Advanced Cross-Modal Matching Branch
         self.use_cross_modal_attention = use_cross_modal_attention
 
         if self.use_cross_modal_attention:
-
             self.cross_modal_attention = CrossModalAttention(
                 text_dim=self.text_encoder.output_dim,
                 image_dim=self.image_encoder.output_dim,
                 embedding_dim=self.embedding_dim,
                 num_heads=cross_modal_num_heads,
                 dropout=cross_modal_dropout,
+                name="cross_modal_attention",
             )
 
-            # Pairwise image-caption matching head
-            self.matching_head = nn.Sequential(
-                nn.Linear(
-                    self.embedding_dim * 2,
-                    self.embedding_dim,
-                ),
-                nn.GELU(),
-                nn.Dropout(cross_modal_dropout),
-                nn.Linear(self.embedding_dim, 1),
+            self.matching_head = tf.keras.Sequential(
+                [
+                    tf.keras.layers.Dense(
+                        self.embedding_dim,
+                        name="matching_hidden",
+                    ),
+                    tf.keras.layers.Activation(
+                        "gelu",
+                        name="matching_gelu",
+                    ),
+                    tf.keras.layers.Dropout(cross_modal_dropout),
+                    tf.keras.layers.Dense(
+                        1,
+                        name="matching_output",
+                    ),
+                ],
+                name="matching_head",
             )
-
         else:
             self.cross_modal_attention = None
             self.matching_head = None
 
-    def encode_image(self, images):
+    def encode_image(self, images, training=None):
         """
         Encode images independently for image-to-text retrieval.
 
         Args:
-            images: Tensor of shape [B, 3, H, W].
+            images: [B, H, W, 3], RGB values in [0, 255].
 
         Returns:
-            Normalized image embeddings of shape [B, 512].
+            Normalized image embeddings [B, 512].
         """
+        images = tf.convert_to_tensor(images)
 
-        if not isinstance(images, torch.Tensor):
-            raise TypeError("Images must be a torch.Tensor.")
+        tf.debugging.assert_rank(
+            images,
+            4,
+            message="Images must have shape [B, H, W, 3].",
+        )
 
-        if images.ndim != 4:
-            raise ValueError(
-                "Images must have shape [B, 3, H, W]."
-            )
+        tf.debugging.assert_equal(
+            tf.shape(images)[-1],
+            3,
+            message="Images must have exactly 3 RGB channels.",
+        )
 
-        if images.size(1) != 3:
-            raise ValueError(
-                "Images must have exactly 3 RGB channels."
-            )
+        tf.debugging.assert_positive(
+            tf.shape(images)[0],
+            message="Image batch cannot be empty.",
+        )
 
-        if images.size(0) == 0:
-            raise ValueError("Image batch cannot be empty.")
+        image_features = self.image_encoder(
+            images,
+            training=training,
+        )
 
-        image_features = self.image_encoder(images)
-
-        image_embeddings = (
-            self.projection.image_projection(image_features)
+        image_embeddings = self.projection.image_projection(
+            image_features,
+            training=training,
         )
 
         return image_embeddings
 
-    def encode_text(self, captions):
+    def encode_text(self, captions, training=None):
         """
         Encode captions independently for text-to-image retrieval.
 
         Args:
-            captions: Tensor of shape [B, L].
+            captions: [B, L] integer token IDs.
 
         Returns:
-            Normalized text embeddings of shape [B, 512].
+            Normalized text embeddings [B, 512].
         """
+        captions = tf.convert_to_tensor(captions)
 
-        if not isinstance(captions, torch.Tensor):
-            raise TypeError("Captions must be a torch.Tensor.")
+        tf.debugging.assert_rank(
+            captions,
+            2,
+            message="Captions must have shape [B, L].",
+        )
 
-        if captions.ndim != 2:
-            raise ValueError(
-                "Captions must have shape [B, L]."
-            )
+        tf.debugging.assert_positive(
+            tf.shape(captions)[0],
+            message="Caption batch cannot be empty.",
+        )
 
-        if captions.size(0) == 0:
-            raise ValueError("Caption batch cannot be empty.")
+        tf.debugging.assert_positive(
+            tf.shape(captions)[1],
+            message="Caption sequence length must be greater than zero.",
+        )
 
-        if captions.size(1) == 0:
-            raise ValueError(
-                "Caption sequence length must be greater than zero."
-            )
+        text_features = self.text_encoder(
+            captions,
+            training=training,
+        )
 
-        text_features = self.text_encoder(captions)
-
-        text_embeddings = (
-            self.projection.text_projection(text_features)
+        text_embeddings = self.projection.text_projection(
+            text_features,
+            training=training,
         )
 
         return text_embeddings
 
-    def forward(
+    def call(
         self,
         images,
         captions,
+        training=None,
         return_attention=False,
     ):
+        images = tf.convert_to_tensor(images)
+        captions = tf.convert_to_tensor(captions)
 
-        # Input Validation
-
-        if images.ndim != 4:
-            raise ValueError(
-                "Images must have shape [B, 3, H, W]."
-            )
-
-        if images.size(1) != 3:
-            raise ValueError(
-                "Images must have exactly 3 RGB channels."
-            )
-
-        if captions.ndim != 3:
-            raise ValueError(
-                "Captions must have shape [B, C, L]."
-            )
-
-        batch_size = images.size(0)
-        num_captions = captions.size(1)
-        sequence_length = captions.size(2)
-
-        if captions.size(0) != batch_size:
-            raise ValueError(
-                "Images and captions must have the same batch size."
-            )
-
-        if num_captions == 0:
-            raise ValueError(
-                "At least one caption per image is required."
-            )
-
-        if sequence_length == 0:
-            raise ValueError(
-                "Caption sequence length must be greater than zero."
-            )
-
-        # 1. Image Encoding
-        if self.use_cross_modal_attention:
-
-            image_features, image_regions = self.image_encoder(
-                images,
-                return_spatial=True,
-            )
-
-        else:
-
-            image_features = self.image_encoder(images)
-            image_regions = None
-
-        # 2. Flatten Captions
-        flat_captions = captions.reshape(
-            batch_size * num_captions,
-            sequence_length,
+        tf.debugging.assert_rank(
+            images,
+            4,
+            message="Images must have shape [B, H, W, 3].",
         )
 
-        # 3. Text Encoding
+        tf.debugging.assert_equal(
+            tf.shape(images)[-1],
+            3,
+            message="Images must have exactly 3 RGB channels.",
+        )
+
+        tf.debugging.assert_rank(
+            captions,
+            3,
+            message="Captions must have shape [B, C, L].",
+        )
+
+        batch_size = tf.shape(images)[0]
+        caption_batch_size = tf.shape(captions)[0]
+        num_captions = tf.shape(captions)[1]
+        sequence_length = tf.shape(captions)[2]
+
+        tf.debugging.assert_equal(
+            batch_size,
+            caption_batch_size,
+            message="Images and captions must have the same batch size.",
+        )
+
+        tf.debugging.assert_positive(
+            batch_size,
+            message="Image batch cannot be empty.",
+        )
+
+        tf.debugging.assert_positive(
+            num_captions,
+            message="At least one caption per image is required.",
+        )
+
+        tf.debugging.assert_positive(
+            sequence_length,
+            message="Caption sequence length must be greater than zero.",
+        )
+
+        # 1. Image encoding.
         if self.use_cross_modal_attention:
+            image_features, image_regions = self.image_encoder(
+                images,
+                training=training,
+                return_spatial=True,
+            )
+        else:
+            image_features = self.image_encoder(
+                images,
+                training=training,
+            )
+            image_regions = None
 
+        # 2. Flatten captions from [B, C, L] to [B*C, L].
+        flat_captions = tf.reshape(
+            captions,
+            (batch_size * num_captions, sequence_length),
+        )
+
+        # 3. Text encoding.
+        if self.use_cross_modal_attention:
             if return_attention:
-
                 (
                     text_features,
                     text_sequence_features,
                     attention_weights,
                 ) = self.text_encoder(
                     flat_captions,
+                    training=training,
                     return_attention=True,
                     return_sequence=True,
                 )
-
             else:
-
-                text_features, text_sequence_features = (
-                    self.text_encoder(
-                        flat_captions,
-                        return_sequence=True,
-                    )
+                (
+                    text_features,
+                    text_sequence_features,
+                ) = self.text_encoder(
+                    flat_captions,
+                    training=training,
+                    return_sequence=True,
                 )
-
                 attention_weights = None
-
         else:
-
             if return_attention:
-
-                text_features, attention_weights = (
-                    self.text_encoder(
-                        flat_captions,
-                        return_attention=True,
-                    )
+                text_features, attention_weights = self.text_encoder(
+                    flat_captions,
+                    training=training,
+                    return_attention=True,
                 )
-
             else:
-
-                text_features = self.text_encoder(flat_captions)
+                text_features = self.text_encoder(
+                    flat_captions,
+                    training=training,
+                )
                 attention_weights = None
 
             text_sequence_features = None
 
-        # 4. Independent Retrieval Embeddings
+        # 4. Independent image and text embeddings.
         image_embeddings, flat_text_embeddings = self.projection(
             image_features,
             text_features,
+            training=training,
         )
 
-        text_embeddings = flat_text_embeddings.reshape(
-            batch_size,
-            num_captions,
-            self.embedding_dim,
+        text_embeddings = tf.reshape(
+            flat_text_embeddings,
+            (batch_size, num_captions, self.embedding_dim),
         )
 
         output = {
@@ -284,86 +324,253 @@ class CrossModalRetrievalModel(nn.Module):
             "text_embeddings": text_embeddings,
         }
 
-        # 5. Optional Cross-Modal Matching
+        # 5. Optional cross-modal matching branch.
         if self.use_cross_modal_attention:
-
-            # Each image is paired with its corresponding captions.
-            paired_image_regions = image_regions.repeat_interleave(
-                num_captions,
-                dim=0,
+            paired_image_regions = tf.repeat(
+                image_regions,
+                repeats=num_captions,
+                axis=0,
             )
 
-            paired_image_embeddings = image_embeddings.repeat_interleave(
-                num_captions,
-                dim=0,
+            paired_image_embeddings = tf.repeat(
+                image_embeddings,
+                repeats=num_captions,
+                axis=0,
             )
 
-            # True = valid token, False = padding.
-            text_mask = flat_captions != 0
+            text_mask = tf.not_equal(flat_captions, 0)
 
-            # Text-to-image cross-attention.
             fused_features, cross_attention_weights = (
                 self.cross_modal_attention(
                     text_features=text_sequence_features,
                     image_regions=paired_image_regions,
                     text_mask=text_mask,
+                    training=training,
                 )
             )
 
-            # Masked mean pooling over valid text tokens.
-            valid_mask = text_mask.unsqueeze(-1).to(
-                fused_features.dtype
+            valid_mask = tf.cast(
+                text_mask[:, :, tf.newaxis],
+                fused_features.dtype,
             )
 
-            fused_pooled = (
-                (fused_features * valid_mask).sum(dim=1)
-                / valid_mask.sum(dim=1).clamp(min=1)
+            summed_features = tf.reduce_sum(
+                fused_features * valid_mask,
+                axis=1,
             )
 
-            # Pairwise matching score.
-            matching_input = torch.cat(
+            valid_counts = tf.reduce_sum(
+                valid_mask,
+                axis=1,
+            )
+
+            fused_pooled = summed_features / tf.maximum(
+                valid_counts,
+                tf.cast(1.0, fused_features.dtype),
+            )
+
+            matching_input = tf.concat(
                 [
                     paired_image_embeddings,
                     fused_pooled,
                 ],
-                dim=1,
+                axis=-1,
             )
 
             matching_scores = self.matching_head(
-                matching_input
-            ).squeeze(-1)
+                matching_input,
+                training=training,
+            )
 
-            output["matching_scores"] = matching_scores.reshape(
-                batch_size,
-                num_captions,
+            matching_scores = tf.squeeze(
+                matching_scores,
+                axis=-1,
+            )
+
+            output["matching_scores"] = tf.reshape(
+                matching_scores,
+                (batch_size, num_captions),
             )
 
             if return_attention:
-
-                output["cross_modal_attention_weights"] = (
-                    cross_attention_weights.reshape(
+                output["cross_modal_attention_weights"] = tf.reshape(
+                    cross_attention_weights,
+                    (
                         batch_size,
                         num_captions,
                         sequence_length,
-                        image_regions.size(1),
-                    )
+                        tf.shape(image_regions)[1],
+                    ),
                 )
 
-        # 6. Original Text Attention Output
+        # 6. Original text attention output.
         if return_attention:
-
             if attention_weights is not None:
-
-                output["attention_weights"] = (
-                    attention_weights.reshape(
-                        batch_size,
-                        num_captions,
-                        sequence_length,
-                    )
+                output["attention_weights"] = tf.reshape(
+                    attention_weights,
+                    (batch_size, num_captions, sequence_length),
                 )
-
             else:
-
                 output["attention_weights"] = None
 
         return output
+
+
+def _run_full_model_tests():
+    tf.random.set_seed(42)
+
+    print("Full Model Tests")
+    print("-" * 60)
+    print(f"TensorFlow: {tf.__version__}")
+
+    batch_size = 2
+    num_captions = 3
+    sequence_length = 12
+    vocab_size = 1000
+
+    # Use the required ResNet50 input size.
+    images = tf.random.uniform(
+        (batch_size, 224, 224, 3),
+        minval=0,
+        maxval=256,
+        dtype=tf.float32,
+    )
+
+    captions = tf.random.uniform(
+        (batch_size, num_captions, sequence_length),
+        minval=4,
+        maxval=vocab_size,
+        dtype=tf.int32,
+    )
+
+    # Add padding to the ends of some captions.
+    captions_array = captions.numpy()
+    captions_array[0, 1, 8:] = 0
+    captions_array[1, 2, 5:] = 0
+    captions = tf.convert_to_tensor(captions_array)
+
+    # Main retrieval model without optional matching branch.
+    model = CrossModalRetrievalModel(
+        vocab_size=vocab_size,
+        encoder_type="gru",
+        embedding_dim=64,
+        hidden_dim=128,
+        num_layers=1,
+        dropout=0.1,
+        use_attention=True,
+        pretrained=False,
+        use_cross_modal_attention=False,
+    )
+
+    outputs = model(
+        images,
+        captions,
+        training=False,
+        return_attention=True,
+    )
+
+    assert tuple(outputs["image_embeddings"].shape) == (
+        batch_size,
+        512,
+    )
+
+    assert tuple(outputs["text_embeddings"].shape) == (
+        batch_size,
+        num_captions,
+        512,
+    )
+
+    image_norms = tf.norm(
+        outputs["image_embeddings"],
+        axis=-1,
+    )
+
+    text_norms = tf.norm(
+        outputs["text_embeddings"],
+        axis=-1,
+    )
+
+    tf.debugging.assert_near(
+        image_norms,
+        tf.ones((batch_size,)),
+        atol=1e-5,
+    )
+
+    tf.debugging.assert_near(
+        text_norms,
+        tf.ones((batch_size, num_captions)),
+        atol=1e-5,
+    )
+
+    assert tuple(outputs["attention_weights"].shape) == (
+        batch_size,
+        num_captions,
+        sequence_length,
+    )
+
+    print("Image embeddings: PASS")
+    print("Text embeddings: PASS")
+    print("Embedding normalization: PASS")
+    print("Text attention output: PASS")
+
+    # Independent encoding interfaces.
+    image_only = model.encode_image(images, training=False)
+
+    text_only = model.encode_text(
+        tf.reshape(captions, (-1, sequence_length)),
+        training=False,
+    )
+
+    assert tuple(image_only.shape) == (batch_size, 512)
+
+    assert tuple(text_only.shape) == (
+        batch_size * num_captions,
+        512,
+    )
+
+    print("encode_image(): PASS")
+    print("encode_text(): PASS")
+
+    # Optional cross-modal branch.
+    advanced_model = CrossModalRetrievalModel(
+        vocab_size=vocab_size,
+        encoder_type="gru",
+        embedding_dim=64,
+        hidden_dim=128,
+        num_layers=1,
+        dropout=0.1,
+        use_attention=True,
+        pretrained=False,
+        use_cross_modal_attention=True,
+    )
+
+    advanced_outputs = advanced_model(
+        images,
+        captions,
+        training=False,
+        return_attention=True,
+    )
+
+    assert tuple(advanced_outputs["matching_scores"].shape) == (
+        batch_size,
+        num_captions,
+    )
+
+    assert tuple(
+        advanced_outputs["cross_modal_attention_weights"].shape
+    ) == (
+        batch_size,
+        num_captions,
+        sequence_length,
+        49,
+    )
+
+    print("Cross-modal matching output: PASS")
+    print("Cross-modal attention output: PASS")
+
+    print("-" * 60)
+    print("All Full Model tests passed!")
+
+
+if __name__ == "__main__":
+    _run_full_model_tests()

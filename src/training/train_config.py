@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass, asdict
 from typing import Optional
 
@@ -6,81 +5,57 @@ from typing import Optional
 @dataclass
 class TrainingConfig:
     """
-    Configuration for training and validation.
-
-    This class centralizes the training hyperparameters,
-    optimizer settings, scheduler settings, and experiment paths.
+    Central configuration for training and validation.
+    TensorFlow / Keras version.
     """
 
-    # -------------------------
-    # Training Settings
-    # -------------------------
+    # Training settings
     epochs: int = 30
     batch_size: int = 32
     learning_rate: float = 1e-4
     weight_decay: float = 1e-4
 
-    # -------------------------
-    # Optimizer Settings
-    # -------------------------
+    # Optimizer
     optimizer: str = "adamw"
 
-    # -------------------------
-    # Scheduler Settings
-    # -------------------------
+    # Scheduler
     scheduler: str = "cosine"
     scheduler_step_size: int = 10
     scheduler_gamma: float = 0.1
     scheduler_patience: int = 3
     min_learning_rate: float = 1e-7
 
-    # -------------------------
-    # Loss Settings
-    # -------------------------
+    # Loss
     loss_type: str = "info_nce"
     temperature: float = 0.07
     margin: float = 0.2
 
-    # -------------------------
-    # Training Stability
-    # -------------------------
+    # Training stability
     gradient_clip_norm: Optional[float] = 1.0
-    use_amp: bool = True
+    use_amp: bool = False
 
-    # -------------------------
-    # DataLoader Settings
-    # -------------------------
+    # Data pipeline
     num_workers: int = 0
-    pin_memory: bool = True
+    pin_memory: bool = False
     drop_last: bool = False
 
-    # -------------------------
     # Reproducibility
-    # -------------------------
     seed: int = 42
     fold: int = 1
 
-    # -------------------------
     # Device
-    # -------------------------
     device: str = "auto"
 
-    # -------------------------
-    # Saving and Logging
-    # -------------------------
+    # Saving and logging
     checkpoint_dir: str = "checkpoints"
     log_dir: str = "runs"
     save_best_only: bool = True
 
-    # -------------------------
-    # Early Stopping
-    # -------------------------
+    # Early stopping
     early_stopping_patience: int = 7
     early_stopping_min_delta: float = 0.001
 
     def __post_init__(self):
-        """Validate configuration values after initialization."""
-
         if self.epochs <= 0:
             raise ValueError("epochs must be greater than 0.")
 
@@ -116,14 +91,10 @@ class TrainingConfig:
             )
 
         if self.scheduler_patience < 0:
-            raise ValueError(
-                "scheduler_patience cannot be negative."
-            )
+            raise ValueError("scheduler_patience cannot be negative.")
 
         if self.min_learning_rate < 0:
-            raise ValueError(
-                "min_learning_rate cannot be negative."
-            )
+            raise ValueError("min_learning_rate cannot be negative.")
 
         if self.loss_type not in {
             "info_nce", "triplet", "margin"
@@ -135,8 +106,8 @@ class TrainingConfig:
         if self.temperature <= 0:
             raise ValueError("temperature must be greater than 0.")
 
-        if self.margin <= 0:
-            raise ValueError("margin must be greater than 0.")
+        if not 0 < self.margin <= 2:
+            raise ValueError("margin must be greater than 0 and at most 2.")
 
         if (
             self.gradient_clip_norm is not None
@@ -155,9 +126,9 @@ class TrainingConfig:
         if self.fold not in range(1, 6):
             raise ValueError("fold must be between 1 and 5.")
 
-        if self.device not in {"auto", "cpu", "cuda"}:
+        if self.device not in {"auto", "cpu"}:
             raise ValueError(
-                "device must be one of: auto, cpu, cuda."
+                "device must be one of: auto, cpu."
             )
 
         if self.early_stopping_patience < 0:
@@ -171,35 +142,22 @@ class TrainingConfig:
             )
 
     def resolve_device(self) -> str:
-        """
-        Resolve the requested device.
+        """Resolve the TensorFlow execution device."""
 
-        'auto' selects CUDA when available, otherwise CPU.
-        """
+        if self.device == "cpu":
+            return "/CPU:0"
 
-        if self.device != "auto":
-            if self.device == "cuda":
-                import torch
+        return "/GPU:0" if self._gpu_available() else "/CPU:0"
 
-                if not torch.cuda.is_available():
-                    raise RuntimeError(
-                        "CUDA was requested but is not available."
-                    )
-
-            return self.device
-
-        import torch
-
-        return "cuda" if torch.cuda.is_available() else "cpu"
+    @staticmethod
+    def _gpu_available() -> bool:
+        import tensorflow as tf
+        return bool(tf.config.list_physical_devices("GPU"))
 
     def to_dict(self) -> dict:
-        """Convert configuration into a dictionary."""
-
         return asdict(self)
 
     def display(self) -> None:
-        """Print all configuration settings."""
-
         print("\n" + "=" * 45)
         print("VISIONMATCH AI - TRAINING CONFIGURATION")
         print("=" * 45)

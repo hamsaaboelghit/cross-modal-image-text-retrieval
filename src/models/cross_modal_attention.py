@@ -1,10 +1,8 @@
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import tensorflow as tf
 
 
-class CrossModalAttention(nn.Module):
+class CrossModalAttention(tf.keras.layers.Layer):
     """
     Text-to-Image Multi-Head Cross-Attention.
 
@@ -14,7 +12,7 @@ class CrossModalAttention(nn.Module):
     Inputs:
         text_features: [B, L, text_dim]
         image_regions: [B, R, image_dim]
-        text_mask:     [B, L], True for valid tokens
+        text_mask: [B, L], True for valid tokens
 
     Outputs:
         output_features: [B, L, embedding_dim]
@@ -28,8 +26,9 @@ class CrossModalAttention(nn.Module):
         embedding_dim=512,
         num_heads=8,
         dropout=0.1,
+        **kwargs,
     ):
-        super().__init__()
+        super().__init__(**kwargs)
 
         if embedding_dim % num_heads != 0:
             raise ValueError(
@@ -42,233 +41,219 @@ class CrossModalAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = embedding_dim // num_heads
 
-        # Project text tokens into the shared embedding space.
-        self.query_projection = nn.Linear(
-            text_dim,
+        self.query_projection = tf.keras.layers.Dense(
             embedding_dim,
+            name="query_projection",
         )
 
-        # Project image regions into the shared embedding space.
-        self.key_projection = nn.Linear(
-            image_dim,
+        self.key_projection = tf.keras.layers.Dense(
             embedding_dim,
+            name="key_projection",
         )
 
-        self.value_projection = nn.Linear(
-            image_dim,
+        self.value_projection = tf.keras.layers.Dense(
             embedding_dim,
+            name="value_projection",
         )
 
-        # Output projection.
-        self.output_projection = nn.Linear(
+        self.output_projection = tf.keras.layers.Dense(
             embedding_dim,
-            embedding_dim,
+            name="output_projection",
         )
 
-        # Residual connection for text features.
-        self.residual_projection = nn.Linear(
-            text_dim,
+        self.residual_projection = tf.keras.layers.Dense(
             embedding_dim,
+            name="residual_projection",
         )
 
-        self.attention_dropout = nn.Dropout(dropout)
-        self.output_dropout = nn.Dropout(dropout)
+        self.attention_dropout = tf.keras.layers.Dropout(dropout)
+        self.output_dropout = tf.keras.layers.Dropout(dropout)
 
-        self.layer_norm = nn.LayerNorm(
-            embedding_dim
+        self.layer_norm = tf.keras.layers.LayerNormalization(
+            epsilon=1e-5,
+            name="output_layer_norm",
         )
 
-    def forward(
+    def call(
         self,
         text_features,
         image_regions,
         text_mask=None,
+        training=None,
     ):
+        text_features = tf.convert_to_tensor(text_features)
+        image_regions = tf.convert_to_tensor(image_regions)
 
-        if text_features.ndim != 3:
-            raise ValueError(
-                "text_features must have shape [B, L, text_dim]."
-            )
-
-        if image_regions.ndim != 3:
-            raise ValueError(
-                "image_regions must have shape [B, R, image_dim]."
-            )
-
-        batch_size, sequence_length, text_dim = (
-            text_features.shape
+        tf.debugging.assert_rank(
+            text_features,
+            3,
+            message="text_features must have shape [B, L, text_dim].",
         )
 
-        image_batch_size, num_regions, image_dim = (
-            image_regions.shape
+        tf.debugging.assert_rank(
+            image_regions,
+            3,
+            message="image_regions must have shape [B, R, image_dim].",
         )
 
-        if text_dim != self.text_dim:
-            raise ValueError(
-                f"Expected text_dim={self.text_dim}, got {text_dim}."
-            )
+        tf.debugging.assert_equal(
+            tf.shape(text_features)[-1],
+            self.text_dim,
+            message="Unexpected text feature dimension.",
+        )
 
-        if image_dim != self.image_dim:
-            raise ValueError(
-                f"Expected image_dim={self.image_dim}, got {image_dim}."
-            )
+        tf.debugging.assert_equal(
+            tf.shape(image_regions)[-1],
+            self.image_dim,
+            message="Unexpected image feature dimension.",
+        )
 
-        if batch_size != image_batch_size:
-            raise ValueError(
-                "Text and image batches must have the same size."
-            )
+        tf.debugging.assert_equal(
+            tf.shape(text_features)[0],
+            tf.shape(image_regions)[0],
+            message="Text and image batches must have the same size.",
+        )
 
-        if num_regions == 0:
-            raise ValueError(
-                "At least one image region is required."
-            )
+        tf.debugging.assert_positive(
+            tf.shape(image_regions)[1],
+            message="At least one image region is required.",
+        )
+
+        batch_size = tf.shape(text_features)[0]
+        sequence_length = tf.shape(text_features)[1]
+        num_regions = tf.shape(image_regions)[1]
 
         if text_mask is not None:
+            text_mask = tf.convert_to_tensor(text_mask)
 
-            if text_mask.shape != (
-                batch_size,
-                sequence_length,
-            ):
-                raise ValueError(
-                    "text_mask must have shape [B, L]."
-                )
+            if text_mask.dtype != tf.bool:
+                raise TypeError("text_mask must have boolean dtype.")
 
-            if text_mask.dtype != torch.bool:
-                raise TypeError(
-                    "text_mask must have boolean dtype."
-                )
+            tf.debugging.assert_equal(
+                tf.shape(text_mask),
+                tf.shape(text_features)[:2],
+                message="text_mask must have shape [B, L].",
+            )
 
-            if not torch.all(text_mask.any(dim=1)):
-                raise ValueError(
-                    "Every sample must contain at least one valid token."
-                )
+            tf.debugging.assert_equal(
+                tf.reduce_all(
+                    tf.reduce_any(text_mask, axis=1)
+                ),
+                True,
+                message="Every sample must contain at least one valid token.",
+            )
 
-        # 1. Generate Queries, Keys and Values.
-        queries = self.query_projection(
-            text_features
-        )
+        # 1. Project Queries, Keys and Values.
+        queries = self.query_projection(text_features)
+        keys = self.key_projection(image_regions)
+        values = self.value_projection(image_regions)
 
-        keys = self.key_projection(
-            image_regions
-        )
-
-        values = self.value_projection(
-            image_regions
-        )
-
-        # 2. Split into multiple attention heads.
-        # Q: [B, heads, L, head_dim]
-        # K: [B, heads, R, head_dim]
-        # V: [B, heads, R, head_dim]
-
-        queries = queries.reshape(
-            batch_size,
-            sequence_length,
-            self.num_heads,
-            self.head_dim,
-        ).transpose(1, 2)
-
-        keys = keys.reshape(
-            batch_size,
-            num_regions,
-            self.num_heads,
-            self.head_dim,
-        ).transpose(1, 2)
-
-        values = values.reshape(
-            batch_size,
-            num_regions,
-            self.num_heads,
-            self.head_dim,
-        ).transpose(1, 2)
-
-        # 3. Scaled Dot-Product Attention.
-        attention_scores = torch.matmul(
+        # 2. Split into multiple heads.
+        # [B, L, E] -> [B, H, L, D]
+        # [B, R, E] -> [B, H, R, D]
+        queries = tf.reshape(
             queries,
-            keys.transpose(-2, -1),
+            (batch_size, sequence_length, self.num_heads, self.head_dim),
         )
 
-        attention_scores = attention_scores / (
-            self.head_dim ** 0.5
+        keys = tf.reshape(
+            keys,
+            (batch_size, num_regions, self.num_heads, self.head_dim),
         )
 
-        attention_weights = torch.softmax(
+        values = tf.reshape(
+            values,
+            (batch_size, num_regions, self.num_heads, self.head_dim),
+        )
+
+        queries = tf.transpose(queries, (0, 2, 1, 3))
+        keys = tf.transpose(keys, (0, 2, 1, 3))
+        values = tf.transpose(values, (0, 2, 1, 3))
+
+        # 3. Scaled dot-product attention.
+        attention_scores = tf.matmul(
+            queries,
+            keys,
+            transpose_b=True,
+        )
+
+        scale = tf.math.sqrt(
+            tf.cast(self.head_dim, attention_scores.dtype)
+        )
+
+        attention_scores = attention_scores / scale
+
+        attention_weights = tf.nn.softmax(
             attention_scores,
-            dim=-1,
+            axis=-1,
         )
 
-        # Preserve normalized attention weights for interpretation.
         normalized_attention_weights = attention_weights
 
-        # Apply dropout only for context computation.
-        dropped_attention_weights = self.attention_dropout(
-            attention_weights
+        dropped_weights = self.attention_dropout(
+            attention_weights,
+            training=training,
         )
 
-        # 4. Combine image information for each text token.
-        context = torch.matmul(
-            dropped_attention_weights,
+        # 4. Aggregate image information for each text token.
+        context = tf.matmul(
+            dropped_weights,
             values,
         )
 
-        # [B, heads, L, head_dim]
-        # -> [B, L, embedding_dim]
-        context = context.transpose(
-            1, 2
-        ).contiguous().reshape(
-            batch_size,
-            sequence_length,
-            self.embedding_dim,
+        # [B, H, L, D] -> [B, L, E]
+        context = tf.transpose(context, (0, 2, 1, 3))
+
+        context = tf.reshape(
+            context,
+            (batch_size, sequence_length, self.embedding_dim),
         )
 
-        # 5. Output projection.
-        context = self.output_projection(
-            context
-        )
+        # 5. Output projection and residual connection.
+        context = self.output_projection(context)
 
-        # 6. Residual connection.
-        residual = self.residual_projection(
-            text_features
-        )
+        residual = self.residual_projection(text_features)
 
         output_features = self.layer_norm(
-            residual + self.output_dropout(context)
+            residual
+            + self.output_dropout(
+                context,
+                training=training,
+            )
         )
 
-        # 7. Ignore padded text positions.
+        # 6. Zero padded text positions.
         if text_mask is not None:
+            valid_positions = text_mask[:, :, tf.newaxis]
 
-            output_features = output_features.masked_fill(
-                ~text_mask.unsqueeze(-1),
-                0.0,
+            output_features = tf.where(
+                valid_positions,
+                output_features,
+                tf.zeros_like(output_features),
             )
 
-            normalized_attention_weights = (
-                normalized_attention_weights.masked_fill(
-                    ~text_mask[:, None, :, None],
-                    0.0,
-                )
+            normalized_attention_weights = tf.where(
+                text_mask[:, tf.newaxis, :, tf.newaxis],
+                normalized_attention_weights,
+                tf.zeros_like(normalized_attention_weights),
             )
 
-        # Average normalized attention across heads.
-        # [B, heads, L, R] -> [B, L, R]
-        averaged_attention = normalized_attention_weights.mean(
-            dim=1
+        # Average normalized weights across attention heads.
+        # [B, H, L, R] -> [B, L, R]
+        averaged_attention = tf.reduce_mean(
+            normalized_attention_weights,
+            axis=1,
         )
 
         return output_features, averaged_attention
 
 
-if __name__ == "__main__":
-
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "cpu"
-    )
+def _run_cross_modal_attention_tests():
+    tf.random.set_seed(42)
 
     print("Cross-Modal Attention Tests")
-    print("-" * 55)
-    print(f"Device: {device}")
+    print("-" * 60)
+    print(f"TensorFlow: {tf.__version__}")
 
     batch_size = 4
     sequence_length = 34
@@ -276,11 +261,7 @@ if __name__ == "__main__":
     image_dim = 2048
     embedding_dim = 512
 
-    # Test both unidirectional and bidirectional text dimensions.
-    text_dimensions = [512, 1024]
-
-    for text_dim in text_dimensions:
-
+    for text_dim in [512, 1024]:
         print(f"\nTesting text_dim={text_dim}")
 
         model = CrossModalAttention(
@@ -289,164 +270,152 @@ if __name__ == "__main__":
             embedding_dim=embedding_dim,
             num_heads=8,
             dropout=0.1,
-        ).to(device)
-
-        text_features = torch.randn(
-            batch_size,
-            sequence_length,
-            text_dim,
-            device=device,
         )
 
-        image_regions = torch.randn(
-            batch_size,
-            num_regions,
-            image_dim,
-            device=device,
+        text_features = tf.random.normal(
+            (batch_size, sequence_length, text_dim)
         )
 
-        # Simulate different caption lengths.
-        text_mask = torch.ones(
-            batch_size,
-            sequence_length,
-            dtype=torch.bool,
-            device=device,
+        image_regions = tf.random.normal(
+            (batch_size, num_regions, image_dim)
         )
 
-        lengths = [34, 28, 20, 15]
+        text_mask = tf.sequence_mask(
+            [34, 28, 20, 15],
+            maxlen=sequence_length,
+        )
 
-        for i, length in enumerate(lengths):
-            text_mask[i, length:] = False
+        # Evaluation mode.
+        output_features, attention_weights = model(
+            text_features,
+            image_regions,
+            text_mask=text_mask,
+            training=False,
+        )
 
-        # --------------------------------
-        # Evaluation Mode Tests
-        # --------------------------------
-
-        model.eval()
-
-        with torch.no_grad():
-
-            output_features, attention_weights = model(
-                text_features,
-                image_regions,
-                text_mask,
-            )
-
-        # Shape checks.
-        assert output_features.shape == (
+        assert tuple(output_features.shape) == (
             batch_size,
             sequence_length,
             embedding_dim,
         )
 
-        assert attention_weights.shape == (
+        assert tuple(attention_weights.shape) == (
             batch_size,
             sequence_length,
             num_regions,
         )
 
-        # Numerical checks.
-        assert torch.isfinite(output_features).all()
-        assert torch.isfinite(attention_weights).all()
+        assert bool(tf.reduce_all(tf.math.is_finite(output_features)))
+        assert bool(tf.reduce_all(tf.math.is_finite(attention_weights)))
 
-        # Attention should sum to 1 for valid tokens.
-        valid_attention_sums = attention_weights.sum(
-            dim=-1
+        attention_sums = tf.reduce_sum(
+            attention_weights,
+            axis=-1,
         )
 
-        assert torch.allclose(
-            valid_attention_sums[text_mask],
-            torch.ones_like(
-                valid_attention_sums[text_mask]
-            ),
-            atol=1e-5,
-        )
-
-        # Padded token attention must be zero.
-        assert torch.all(
-            attention_weights[~text_mask] == 0
-        )
-
-        # Padded output features must be zero.
-        assert torch.all(
-            output_features[~text_mask] == 0
-        )
-
-        # --------------------------------
-        # Training Mode Tests
-        # --------------------------------
-
-        model.train()
-
-        output_features, attention_weights = model(
-            text_features,
-            image_regions,
+        valid_sums = tf.boolean_mask(
+            attention_sums,
             text_mask,
         )
 
-        # Attention must remain normalized during training.
-        train_attention_sums = attention_weights.sum(
-            dim=-1
-        )
-
-        assert torch.allclose(
-            train_attention_sums[text_mask],
-            torch.ones_like(
-                train_attention_sums[text_mask]
-            ),
+        tf.debugging.assert_near(
+            valid_sums,
+            tf.ones_like(valid_sums),
             atol=1e-5,
         )
 
-        # Padded attention must remain zero during training.
-        assert torch.all(
-            attention_weights[~text_mask] == 0
+        padded_attention = tf.boolean_mask(
+            attention_weights,
+            tf.logical_not(text_mask),
         )
 
-        # Backward pass.
-        loss = output_features.square().mean()
-
-        loss.backward()
-
-        # Check gradients.
-        parameters_with_gradients = sum(
-            1
-            for parameter in model.parameters()
-            if parameter.grad is not None
-            and torch.isfinite(parameter.grad).all()
+        tf.debugging.assert_near(
+            padded_attention,
+            tf.zeros_like(padded_attention),
+            atol=1e-6,
         )
 
-        total_parameters = sum(
-            1
-            for parameter in model.parameters()
-            if parameter.requires_grad
+        padded_outputs = tf.boolean_mask(
+            output_features,
+            tf.logical_not(text_mask),
         )
 
-        assert parameters_with_gradients == total_parameters
-
-        print(
-            f"Output Features: {list(output_features.shape)} | PASS"
-        )
-
-        print(
-            f"Attention Weights: {list(attention_weights.shape)} | PASS"
+        tf.debugging.assert_near(
+            padded_outputs,
+            tf.zeros_like(padded_outputs),
+            atol=1e-6,
         )
 
         print("Evaluation Mode: PASS")
-        print("Training Mode: PASS")
-        print("Padding Mask: PASS")
         print("Attention Normalization: PASS")
-        print("Backward Pass: PASS")
+        print("Padding Mask: PASS")
 
-        print(
-            f"Gradient Check: "
-            f"{parameters_with_gradients}/{total_parameters} | PASS"
+        # Training mode and gradient flow.
+        with tf.GradientTape() as tape:
+            train_outputs, train_weights = model(
+                text_features,
+                image_regions,
+                text_mask=text_mask,
+                training=True,
+            )
+
+            loss = tf.reduce_mean(tf.square(train_outputs))
+
+        gradients = tape.gradient(
+            loss,
+            model.trainable_variables,
         )
 
-        del model
-        del text_features, image_regions
-        del output_features, attention_weights
+        assert gradients
+        assert all(gradient is not None for gradient in gradients)
 
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+        assert bool(
+            tf.reduce_all(
+                tf.stack(
+                    [
+                        tf.reduce_all(tf.math.is_finite(gradient))
+                        for gradient in gradients
+                    ]
+                )
+            )
+        )
 
-    print("\nAll Cross-Modal Attention tests passed!")
+        train_sums = tf.reduce_sum(train_weights, axis=-1)
+        valid_train_sums = tf.boolean_mask(train_sums, text_mask)
+
+        tf.debugging.assert_near(
+            valid_train_sums,
+            tf.ones_like(valid_train_sums),
+            atol=1e-5,
+        )
+
+        print("Training Mode: PASS")
+        print("Backward Pass: PASS")
+        print(
+            f"Output: {tuple(train_outputs.shape)} | "
+            f"Attention: {tuple(train_weights.shape)} | PASS"
+        )
+
+    # Reject samples with no valid text tokens.
+    invalid_mask = tf.zeros(
+        (2, 5),
+        dtype=tf.bool,
+    )
+
+    try:
+        model(
+            tf.random.normal((2, 5, 1024)),
+            tf.random.normal((2, 7, image_dim)),
+            text_mask=invalid_mask,
+            training=False,
+        )
+        raise AssertionError("All-padding text should have been rejected")
+    except tf.errors.InvalidArgumentError:
+        print("All-padding input rejection: PASS")
+
+    print("-" * 60)
+    print("All Cross-Modal Attention tests passed!")
+
+
+if __name__ == "__main__":
+    _run_cross_modal_attention_tests()

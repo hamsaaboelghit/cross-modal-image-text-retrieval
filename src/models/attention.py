@@ -1,13 +1,27 @@
 
-import torch
-import torch.nn as nn
+import tensorflow as tf
 
 
-class AdditiveAttention(nn.Module):
+class AdditiveAttention(tf.keras.layers.Layer):
+    """
+    Additive Attention with padding-mask support.
 
-    def __init__(self, hidden_dim, attention_dim=None):
+    Input:
+        hidden_states: [B, L, hidden_dim]
+        mask:          [B, L], True for valid tokens.
 
-        super().__init__()
+    Returns:
+        context_vector:   [B, hidden_dim]
+        attention_weights:[B, L]
+    """
+
+    def __init__(
+        self,
+        hidden_dim,
+        attention_dim=None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
 
         if hidden_dim <= 0:
             raise ValueError(
@@ -25,139 +39,112 @@ class AdditiveAttention(nn.Module):
         self.hidden_dim = hidden_dim
         self.attention_dim = attention_dim
 
-        self.feature_layer = nn.Linear(
-            hidden_dim,
+        self.feature_layer = tf.keras.layers.Dense(
             attention_dim,
-            bias=True,
+            activation=None,
+            use_bias=True,
         )
 
-        self.score_layer = nn.Linear(
-            attention_dim,
+        self.score_layer = tf.keras.layers.Dense(
             1,
-            bias=False,
+            activation=None,
+            use_bias=False,
         )
 
-    def forward(self, hidden_states, mask=None):
+    def call(self, hidden_states, mask=None):
+        hidden_states = tf.convert_to_tensor(hidden_states)
 
-        # Input Validation
-        if not isinstance(hidden_states, torch.Tensor):
-            raise TypeError(
-                "hidden_states must be a PyTorch tensor."
-            )
-
-        if hidden_states.ndim != 3:
-            raise ValueError(
+        tf.debugging.assert_rank(
+            hidden_states,
+            3,
+            message=(
                 "hidden_states must have shape "
                 "[batch, sequence_length, hidden_dim]."
-            )
-
-        batch_size, sequence_length, hidden_dim = (
-            hidden_states.shape
+            ),
         )
 
-        if batch_size == 0:
-            raise ValueError(
-                "Batch size must be greater than zero."
-            )
+        tf.debugging.assert_equal(
+            tf.shape(hidden_states)[-1],
+            self.hidden_dim,
+            message="Unexpected hidden dimension.",
+        )
 
-        if sequence_length == 0:
-            raise ValueError(
-                "Sequence length must be greater than zero."
-            )
+        tf.debugging.assert_positive(
+            tf.shape(hidden_states)[0],
+            message="Batch size must be greater than zero.",
+        )
 
-        if hidden_dim != self.hidden_dim:
-            raise ValueError(
-                f"Expected hidden_dim={self.hidden_dim}, "
-                f"but received {hidden_dim}."
-            )
+        tf.debugging.assert_positive(
+            tf.shape(hidden_states)[1],
+            message="Sequence length must be greater than zero.",
+        )
 
-        if not torch.is_floating_point(hidden_states):
-            raise TypeError(
-                "hidden_states must have a floating-point dtype."
-            )
+        tf.debugging.assert_all_finite(
+            hidden_states,
+            "hidden_states contains NaN or Inf.",
+        )
 
-        if not torch.isfinite(hidden_states).all():
-            raise ValueError(
-                "hidden_states contains NaN or Inf values."
+        # Additive attention scores.
+        scores = self.score_layer(
+            tf.math.tanh(
+                self.feature_layer(hidden_states)
             )
+        )
 
-        # Mask Validation
+        scores = tf.squeeze(scores, axis=-1)
+        # scores: [B, L]
+
         if mask is not None:
+            mask = tf.cast(mask, tf.bool)
 
-            if not isinstance(mask, torch.Tensor):
-                raise TypeError(
-                    "mask must be a PyTorch tensor."
-                )
+            tf.debugging.assert_equal(
+                tf.shape(mask),
+                tf.shape(scores),
+                message="mask must have shape [B, L].",
+            )
 
-            if mask.shape != (
-                batch_size,
-                sequence_length,
-            ):
-                raise ValueError(
-                    "mask must have shape "
-                    "[batch, sequence_length]."
-                )
+            # Reject samples containing only padding tokens.
+            valid_per_sample = tf.reduce_any(
+                mask,
+                axis=1,
+            )
 
-            if mask.dtype != torch.bool:
-                raise TypeError(
-                    "mask must have boolean dtype."
-                )
-
-            if mask.device != hidden_states.device:
-                raise ValueError(
-                    "mask and hidden_states must be "
-                    "on the same device."
-                )
-
-            # Every sample must contain at least one valid token.
-            valid_samples = mask.any(dim=1)
-
-            if not torch.all(valid_samples):
-                raise ValueError(
+            tf.debugging.assert_equal(
+                tf.reduce_all(valid_per_sample),
+                True,
+                message=(
                     "Every sample must contain at least "
                     "one valid token. All-padding sequences "
                     "are not supported."
-                )
-
-        # 1. Calculate Additive Attention Scores
-        scores = self.score_layer(
-            torch.tanh(
-                self.feature_layer(hidden_states)
-            )
-        ).squeeze(-1)
-
-        # scores: [batch, sequence_length]
-
-        # 2. Apply Padding Mask
-        if mask is not None:
-
-            scores = scores.masked_fill(
-                ~mask,
-                torch.finfo(scores.dtype).min,
+                ),
             )
 
-        # 3. Normalize Attention Scores
-        attention_weights = torch.softmax(
+            # Exclude padding positions from softmax.
+            scores = tf.where(
+                mask,
+                scores,
+                tf.cast(-1e9, scores.dtype),
+            )
+
+        # Normalize attention scores.
+        attention_weights = tf.nn.softmax(
             scores,
-            dim=1,
+            axis=1,
         )
 
-        # 4. Calculate Context Vector
-        context_vector = torch.sum(
+        # Context vector: weighted sum of token features.
+        context_vector = tf.reduce_sum(
             hidden_states
-            * attention_weights.unsqueeze(-1),
-            dim=1,
+            * tf.expand_dims(attention_weights, axis=-1),
+            axis=1,
         )
 
         return context_vector, attention_weights
 
 
 if __name__ == "__main__":
-
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "cpu"
-    )
+    print("Additive Attention Tests")
+    print("-" * 45)
 
     batch_size = 4
     sequence_length = 34
@@ -165,156 +152,149 @@ if __name__ == "__main__":
 
     model = AdditiveAttention(
         hidden_dim=hidden_dim,
-    ).to(device)
-
-    # --------------------------------------------------
-    # Test 1: Normal Forward Pass
-    # --------------------------------------------------
-
-    hidden_states = torch.randn(
-        batch_size,
-        sequence_length,
-        hidden_dim,
-        device=device,
     )
 
-    lengths = torch.tensor(
+    hidden_states = tf.random.normal(
+        shape=(
+            batch_size,
+            sequence_length,
+            hidden_dim,
+        )
+    )
+
+    lengths = tf.constant(
         [34, 28, 25, 20],
-        device=device,
+        dtype=tf.int32,
     )
 
-    positions = torch.arange(
+    positions = tf.range(
         sequence_length,
-        device=device,
-    ).unsqueeze(0)
+        dtype=tf.int32,
+    )[tf.newaxis, :]
 
-    mask = positions < lengths.unsqueeze(1)
+    mask = positions < lengths[:, tf.newaxis]
 
-    context, weights = model(
-        hidden_states,
-        mask,
-    )
+    # Test 1: Forward pass
+    with tf.GradientTape() as tape:
+        tape.watch(hidden_states)
 
-    assert context.shape == (
+        context, weights = model(
+            hidden_states,
+            mask=mask,
+        )
+
+        loss = tf.reduce_mean(tf.square(context))
+
+    assert tuple(context.shape) == (
         batch_size,
         hidden_dim,
     )
 
-    assert weights.shape == (
+    assert tuple(weights.shape) == (
         batch_size,
         sequence_length,
     )
 
-    assert torch.isfinite(context).all()
-    assert torch.isfinite(weights).all()
+    tf.debugging.assert_all_finite(
+        context,
+        "Context contains NaN or Inf.",
+    )
 
-    print("Test 1 - Forward Pass: PASS")
+    tf.debugging.assert_all_finite(
+        weights,
+        "Attention weights contain NaN or Inf.",
+    )
 
-    # --------------------------------------------------
-    # Test 2: Attention Normalization
-    # --------------------------------------------------
+    print("Forward pass: PASS")
 
-    assert torch.allclose(
-        weights.sum(dim=1),
-        torch.ones(batch_size, device=device),
+    # Test 2: Attention normalization
+    weight_sums = tf.reduce_sum(
+        weights,
+        axis=1,
+    )
+
+    tf.debugging.assert_near(
+        weight_sums,
+        tf.ones((batch_size,)),
         atol=1e-6,
     )
 
-    print("Test 2 - Attention Normalization: PASS")
+    print("Attention normalization: PASS")
 
-    # --------------------------------------------------
-    # Test 3: Padding Mask
-    # --------------------------------------------------
+    # Test 3: Padding mask
+    invalid_positions = tf.logical_not(mask)
 
-    for i, length in enumerate(lengths.tolist()):
+    padded_weights = tf.boolean_mask(
+        weights,
+        invalid_positions,
+    )
 
-        assert torch.all(
-            weights[i, length:] == 0
+    tf.debugging.assert_near(
+        padded_weights,
+        tf.zeros_like(padded_weights),
+        atol=1e-7,
+    )
+
+    print("Padding mask: PASS")
+
+    # Test 4: Backward pass
+    gradients = tape.gradient(
+        loss,
+        [
+            hidden_states,
+            *model.trainable_variables,
+        ],
+    )
+
+    assert all(
+        gradient is not None
+        for gradient in gradients
+    )
+
+    for gradient in gradients:
+        tf.debugging.assert_all_finite(
+            gradient,
+            "A gradient contains NaN or Inf.",
         )
 
-    print("Test 3 - Padding Mask: PASS")
+    print("Backward pass: PASS")
 
-    # --------------------------------------------------
-    # Test 4: Backward Pass
-    # --------------------------------------------------
-
-    model.zero_grad()
-
-    loss = context.square().mean()
-    loss.backward()
-
-    for name, parameter in model.named_parameters():
-
-        assert parameter.grad is not None, (
-            f"Missing gradient: {name}"
-        )
-
-        assert torch.isfinite(parameter.grad).all(), (
-            f"Invalid gradient: {name}"
-        )
-
-    print("Test 4 - Backward Pass: PASS")
-
-    # --------------------------------------------------
-    # Test 5: All-Padding Input Rejection
-    # --------------------------------------------------
-
-    all_padding_mask = torch.zeros(
-        batch_size,
-        sequence_length,
-        dtype=torch.bool,
-        device=device,
+    # Test 5: All-padding input rejection
+    all_padding_mask = tf.zeros(
+        (batch_size, sequence_length),
+        dtype=tf.bool,
     )
 
     try:
-
         model(
             hidden_states,
-            all_padding_mask,
+            mask=all_padding_mask,
         )
 
         raise AssertionError(
             "All-padding input should have been rejected."
         )
 
-    except ValueError as error:
+    except tf.errors.InvalidArgumentError:
+        print("All-padding input rejection: PASS")
 
-        assert "All-padding sequences" in str(error)
+    # Test 6: No mask
+    context_without_mask, weights_without_mask = model(
+        hidden_states,
+        mask=None,
+    )
 
-    print("Test 5 - All-Padding Rejection: PASS")
+    assert tuple(context_without_mask.shape) == (
+        batch_size,
+        hidden_dim,
+    )
 
-    # --------------------------------------------------
-    # Test 6: Invalid Dimensions
-    # --------------------------------------------------
+    assert tuple(weights_without_mask.shape) == (
+        batch_size,
+        sequence_length,
+    )
 
-    try:
+    print("Forward pass without mask: PASS")
 
-        model(
-            torch.randn(4, 512, device=device),
-        )
-
-        raise AssertionError(
-            "Invalid input dimensions should be rejected."
-        )
-
-    except TypeError:
-        raise
-
-    except ValueError:
-        pass
-
-    print("Test 6 - Invalid Input Validation: PASS")
-
-    # --------------------------------------------------
-    # Final Results
-    # --------------------------------------------------
-
-    print("\n" + "=" * 50)
-    print("ADDITIVE ATTENTION TEST RESULTS")
-    print("=" * 50)
-
-    print(f"Device: {device}")
-    print(f"Input Shape: {hidden_states.shape}")
-    print(f"Context Shape: {context.shape}")
-    print(f"Attention Shape: {weights.shape}")
-    print("All tests passed!")
+    print("-" * 45)
+    print("All Additive Attention tests passed!")
