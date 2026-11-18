@@ -1,3 +1,4 @@
+
 import json
 import random
 import time
@@ -34,21 +35,55 @@ def run_experiment(
     batch_size=8,
     seed=42,
     fold=1,
+    learning_rate=1e-4,
+    temperature=0.07,
+    output_dim=512,
+    dropout=None,
+    log_dir="runs",
 ):
+    """
+    Run one reproducible image-text retrieval experiment.
+
+    Hyperparameter arguments are configurable while their defaults
+    preserve the original project configuration.
+    """
+
+    if model_type not in {"baseline", "full"}:
+        raise ValueError(
+            f"Unsupported model_type: {model_type}"
+        )
+
+    if learning_rate <= 0:
+        raise ValueError("learning_rate must be positive.")
+
+    if temperature <= 0:
+        raise ValueError("temperature must be positive.")
+
+    if output_dim <= 0:
+        raise ValueError("output_dim must be positive.")
+
+    if dropout is None:
+        dropout = 0.1 if model_type == "baseline" else 0.2
+
+    if not 0.0 <= dropout < 1.0:
+        raise ValueError("dropout must be in [0, 1).")
+
     set_seed(seed)
 
-    print("\n" + "=" * 65)
+    print("\n" + "=" * 70)
     print(f"VISIONMATCH AI - {experiment_name.upper()}")
-    print("=" * 65)
+    print("=" * 70)
 
     vocab_path = Path(
         f"data/processed/flickr30k/vocabularies/fold_{fold}_vocab.json"
     )
 
     if not vocab_path.is_file():
-        raise FileNotFoundError(f"Vocabulary not found: {vocab_path}")
+        raise FileNotFoundError(
+            f"Vocabulary not found: {vocab_path}"
+        )
 
-    with open(vocab_path, "r", encoding="utf-8") as file:
+    with vocab_path.open("r", encoding="utf-8") as file:
         vocabulary = json.load(file)
 
     vocab_size = len(vocabulary)
@@ -63,12 +98,12 @@ def run_experiment(
     config = TrainingConfig(
         epochs=epochs,
         batch_size=batch_size,
-        learning_rate=1e-4,
+        learning_rate=learning_rate,
         weight_decay=1e-4,
         optimizer="adamw",
         scheduler="none",
         loss_type="info_nce",
-        temperature=0.07,
+        temperature=temperature,
         use_amp=False,
         num_workers=0,
         pin_memory=False,
@@ -77,7 +112,7 @@ def run_experiment(
         fold=fold,
         device="auto",
         checkpoint_dir=f"checkpoints/experiments/{experiment_name}",
-        log_dir="runs",
+        log_dir=log_dir,
         save_best_only=True,
         early_stopping_patience=3,
         early_stopping_min_delta=0.001,
@@ -103,18 +138,19 @@ def run_experiment(
         model = BaselineRetrievalModel(
             vocab_size=vocab_size,
             embedding_dim=300,
-            output_dim=512,
-            dropout=0.1,
+            output_dim=output_dim,
+            dropout=dropout,
         )
 
-    elif model_type == "full":
+    else:
         model = CrossModalRetrievalModel(
             vocab_size=vocab_size,
             encoder_type=encoder_type,
             embedding_dim=300,
             hidden_dim=512,
+            output_dim=output_dim,
             num_layers=1,
-            dropout=0.2,
+            dropout=dropout,
             bidirectional=False,
             use_attention=True,
             pretrained=pretrained,
@@ -122,12 +158,13 @@ def run_experiment(
             use_cross_modal_attention=use_cross_modal_attention,
         )
 
-    else:
-        raise ValueError(f"Unsupported model_type: {model_type}")
-
     print("\nModel configuration:")
     print(f"Model type: {model_type}")
     print(f"Encoder: {encoder_type}")
+    print(f"Retrieval embedding dimension: {output_dim}")
+    print(f"Dropout: {dropout}")
+    print(f"Learning rate: {learning_rate}")
+    print(f"Temperature: {temperature}")
     print(f"Cross-modal attention: {use_cross_modal_attention}")
     print(f"Pretrained ResNet50: {pretrained}")
 
@@ -165,18 +202,27 @@ def run_experiment(
         early_stopping=early_stopping,
     )
 
-    elapsed_minutes = (time.time() - start_time) / 60
+    elapsed_minutes = (time.time() - start_time) / 60.0
 
-    print("\n" + "=" * 65)
+    print("\n" + "=" * 70)
     print(f"{experiment_name.upper()} COMPLETED")
-    print("=" * 65)
+    print("=" * 70)
 
     if history["train_loss"]:
-        print(f"Final training loss: {history['train_loss'][-1]:.6f}")
+        print(
+            f"Final training loss: "
+            f"{history['train_loss'][-1]:.6f}"
+        )
 
     if history["val_loss"]:
-        print(f"Final validation loss: {history['val_loss'][-1]:.6f}")
-        print(f"Best validation loss: {min(history['val_loss']):.6f}")
+        print(
+            f"Final validation loss: "
+            f"{history['val_loss'][-1]:.6f}"
+        )
+        print(
+            f"Best validation loss: "
+            f"{min(history['val_loss']):.6f}"
+        )
 
     print(f"Training time: {elapsed_minutes:.2f} minutes")
     print(f"Checkpoints: {config.checkpoint_dir}")
@@ -187,4 +233,6 @@ def run_experiment(
 
 
 if __name__ == "__main__":
-    print("Shared TensorFlow experiment runner imported successfully.")
+    print(
+        "Configurable TensorFlow experiment runner imported successfully."
+    )

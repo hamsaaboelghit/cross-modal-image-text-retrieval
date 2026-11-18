@@ -25,8 +25,8 @@ class CrossModalRetrievalModel(tf.keras.Model):
         [B, C, L], integer token IDs.
 
     Outputs:
-        image_embeddings: [B, 512]
-        text_embeddings: [B, C, 512]
+        image_embeddings: [B, output_dim]
+        text_embeddings: [B, C, output_dim]
 
     Optional matching outputs:
         matching_scores: [B, C]
@@ -50,9 +50,15 @@ class CrossModalRetrievalModel(tf.keras.Model):
         use_cross_modal_attention=False,
         cross_modal_num_heads=8,
         cross_modal_dropout=0.1,
+        output_dim=512,
         **kwargs,
     ):
         super().__init__(**kwargs)
+
+        if output_dim <= 0:
+            raise ValueError("output_dim must be positive.")
+
+        self.embedding_dim = output_dim
 
         self.image_encoder = ImageEncoder(
             pretrained=pretrained,
@@ -75,12 +81,11 @@ class CrossModalRetrievalModel(tf.keras.Model):
         self.projection = CrossModalProjection(
             image_dim=self.image_encoder.output_dim,
             text_dim=self.text_encoder.output_dim,
-            embedding_dim=512,
+            embedding_dim=self.embedding_dim,
             dropout=projection_dropout,
             name="cross_modal_projection",
         )
 
-        self.embedding_dim = 512
         self.use_cross_modal_attention = bool(
             use_cross_modal_attention
         )
@@ -172,7 +177,7 @@ class CrossModalRetrievalModel(tf.keras.Model):
             text_sequence_features: [N, L, text_dim]
             text_mask: [N, L]
             image_regions: [N, R, image_dim]
-            image_embeddings: [N, 512]
+            image_embeddings: [N, output_dim]
         """
 
         fused_features, attention_weights = (
@@ -513,6 +518,7 @@ def _run_full_model_tests():
         use_attention=True,
         pretrained=False,
         use_cross_modal_attention=False,
+        output_dim=512,
     )
 
     outputs = model(
@@ -574,6 +580,41 @@ def _run_full_model_tests():
     print("Independent image encoding: PASS")
     print("Independent text encoding: PASS")
 
+    # Test a non-default embedding dimension.
+    custom_dim = 256
+
+    custom_model = CrossModalRetrievalModel(
+        vocab_size=vocab_size,
+        encoder_type="gru",
+        embedding_dim=64,
+        hidden_dim=128,
+        num_layers=1,
+        dropout=0.1,
+        use_attention=True,
+        pretrained=False,
+        use_cross_modal_attention=False,
+        output_dim=custom_dim,
+    )
+
+    custom_outputs = custom_model(
+        images,
+        captions,
+        training=False,
+    )
+
+    assert tuple(custom_outputs["image_embeddings"].shape) == (
+        batch_size,
+        custom_dim,
+    )
+
+    assert tuple(custom_outputs["text_embeddings"].shape) == (
+        batch_size,
+        num_captions,
+        custom_dim,
+    )
+
+    print("Configurable embedding dimension: PASS")
+
     advanced_model = CrossModalRetrievalModel(
         vocab_size=vocab_size,
         encoder_type="gru",
@@ -584,6 +625,7 @@ def _run_full_model_tests():
         use_attention=True,
         pretrained=False,
         use_cross_modal_attention=True,
+        output_dim=custom_dim,
     )
 
     with tf.GradientTape() as tape:
@@ -619,7 +661,43 @@ def _run_full_model_tests():
         advanced_model.trainable_variables,
     )
 
+    # --------------------------------------------------
+    # Gradient diagnostic
+    # --------------------------------------------------
     assert gradients
+
+    print("\nGradient diagnostic:")
+    missing_gradients = []
+
+    for variable, gradient in zip(
+        advanced_model.trainable_variables,
+        gradients,
+    ):
+        variable_name = getattr(
+            variable,
+            "path",
+            variable.name,
+        )
+
+        if gradient is None:
+            status = "MISSING"
+            missing_gradients.append(variable_name)
+        else:
+            status = "OK"
+
+        print(f"{variable_name}: {status}")
+
+    print("\nTotal trainable variables:", len(gradients))
+    print("Missing gradients:", len(missing_gradients))
+
+    if missing_gradients:
+        print("\nVariables with missing gradients:")
+        for variable_name in missing_gradients:
+            print(variable_name)
+
+    # Keep the original assertion for now.
+    # We will decide whether these missing gradients are expected
+    # after inspecting the diagnostic output.
     assert all(gradient is not None for gradient in gradients)
 
     for gradient in gradients:
