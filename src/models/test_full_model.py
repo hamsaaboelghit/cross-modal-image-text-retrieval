@@ -1,180 +1,163 @@
 
-import json
-from pathlib import Path
-
-import torch
-
-import sys
-
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(PROJECT_ROOT))
+import pytest
+import tensorflow as tf
 
 from src.models.full_model import CrossModalRetrievalModel
 
-# Project paths
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-VOCAB_PATH = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-    / "flickr30k"
-    / "vocabularies"
-    / "fold_1_vocab.json"
-)
+@pytest.fixture
+def sample_inputs():
+    tf.random.set_seed(42)
 
-
-def main():
-
-    print("Full Model Integration Test")
-    print("-" * 50)
-
-    # 1. Device
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() else "cpu"
+    images = tf.random.uniform(
+        (2, 224, 224, 3),
+        minval=0,
+        maxval=256,
+        dtype=tf.float32,
     )
-    print(f"Device: {device}")
 
-    # 2. Load vocabulary
-    with open(VOCAB_PATH, "r", encoding="utf-8") as file:
-        vocab = json.load(file)
+    captions = tf.random.uniform(
+        (2, 3, 12),
+        minval=4,
+        maxval=1000,
+        dtype=tf.int32,
+    )
 
-    vocab_size = len(vocab)
-    print(f"Vocabulary size: {vocab_size}")
+    captions_array = captions.numpy()
+    captions_array[0, 1, 8:] = 0
+    captions_array[1, 2, 6:] = 0
 
-    # 3. Model
-    model = CrossModalRetrievalModel(
-        vocab_size=vocab_size,
-        encoder_type="lstm",
-        embedding_dim=300,
-        hidden_dim=512,
+    return images, tf.convert_to_tensor(captions_array)
+
+
+def create_model():
+    return CrossModalRetrievalModel(
+        vocab_size=1000,
+        encoder_type="gru",
+        embedding_dim=64,
+        hidden_dim=64,
         num_layers=1,
-        dropout=0.2,
+        dropout=0.1,
         bidirectional=False,
         use_attention=True,
         pretrained=False,
-        unfreeze_last_block=False,
-    ).to(device)
-
-    model.train()
-
-    # 4. Dummy input
-    batch_size = 2
-    num_captions = 5
-    max_length = 34
-
-    images = torch.randn(
-        batch_size, 3, 224, 224
-    ).to(device)
-
-    captions = torch.zeros(
-        batch_size,
-        num_captions,
-        max_length,
-        dtype=torch.long,
+        use_cross_modal_attention=False,
     )
 
-    # Create captions with different lengths
-    for i in range(batch_size):
-        for j in range(num_captions):
 
-            length = torch.randint(
-                20, max_length + 1, (1,)
-            ).item()
+def test_full_model_forward_pass(sample_inputs):
+    images, captions = sample_inputs
+    model = create_model()
 
-            tokens = torch.randint(
-                4, vocab_size, (length,)
-            )
-
-            captions[i, j, :length] = tokens
-
-    captions = captions.to(device)
-
-    # 5. Forward pass
     outputs = model(
         images,
         captions,
+        training=False,
         return_attention=True,
     )
 
-    image_embeddings = outputs["image_embeddings"]
-    text_embeddings = outputs["text_embeddings"]
-    attention_weights = outputs["attention_weights"]
+    assert tuple(outputs["image_embeddings"].shape) == (2, 512)
+    assert tuple(outputs["text_embeddings"].shape) == (2, 3, 512)
+    assert tuple(outputs["attention_weights"].shape) == (2, 3, 12)
 
-    print("\nForward Pass:")
-    print(f"Image Embeddings: {image_embeddings.shape}")
-    print(f"Text Embeddings: {text_embeddings.shape}")
-    print(f"Attention Weights: {attention_weights.shape}")
-
-    # 6. Shape validation
-    assert image_embeddings.shape == (batch_size, 512)
-    assert text_embeddings.shape == (
-        batch_size, num_captions, 512
-    )
-    assert attention_weights.shape == (
-        batch_size, num_captions, max_length
+    tf.debugging.assert_all_finite(
+        outputs["image_embeddings"],
+        "Invalid image embeddings",
     )
 
-    # 7. Embedding normalization
-    image_norms = image_embeddings.norm(dim=1)
-    text_norms = text_embeddings.norm(dim=2)
+    tf.debugging.assert_all_finite(
+        outputs["text_embeddings"],
+        "Invalid text embeddings",
+    )
 
-    assert torch.allclose(
-        image_norms,
-        torch.ones_like(image_norms),
+    tf.debugging.assert_all_finite(
+        outputs["attention_weights"],
+        "Invalid attention weights",
+    )
+
+
+def test_embedding_normalization(sample_inputs):
+    images, captions = sample_inputs
+    outputs = create_model()(
+        images,
+        captions,
+        training=False,
+    )
+
+    tf.debugging.assert_near(
+        tf.norm(outputs["image_embeddings"], axis=-1),
+        tf.ones((2,)),
         atol=1e-4,
     )
 
-    assert torch.allclose(
-        text_norms,
-        torch.ones_like(text_norms),
+    tf.debugging.assert_near(
+        tf.norm(outputs["text_embeddings"], axis=-1),
+        tf.ones((2, 3)),
         atol=1e-4,
     )
 
-    print("\nEmbedding normalization: PASS")
 
-    # 8. Numerical validation
-    assert torch.isfinite(image_embeddings).all()
-    assert torch.isfinite(text_embeddings).all()
-    assert torch.isfinite(attention_weights).all()
+def test_attention_ignores_padding(sample_inputs):
+    images, captions = sample_inputs
 
-    print("Numerical validation: PASS")
-
-    # 9. Backward pass
-    similarities = (
-        image_embeddings.unsqueeze(1) * text_embeddings
-    ).sum(dim=2)
-
-    loss = 1.0 - similarities.mean()
-
-    loss.backward()
-
-    trainable_params = [
-        p for p in model.parameters()
-        if p.requires_grad
-    ]
-
-    params_with_grad = [
-        p for p in trainable_params
-        if p.grad is not None
-    ]
-
-    assert len(params_with_grad) > 0
-
-    assert all(
-        torch.isfinite(p.grad).all()
-        for p in params_with_grad
+    outputs = create_model()(
+        images,
+        captions,
+        training=False,
+        return_attention=True,
     )
 
-    print("\nBackward Pass: PASS")
-    print(f"Test Loss: {loss.item():.6f}")
-    print(
-        f"Parameters with gradients: "
-        f"{len(params_with_grad)}/{len(trainable_params)}"
+    flat_captions = tf.reshape(captions, (-1, 12))
+    flat_attention = tf.reshape(outputs["attention_weights"], (-1, 12))
+
+    padding_mask = tf.equal(flat_captions, 0)
+    padded_weights = tf.boolean_mask(flat_attention, padding_mask)
+
+    tf.debugging.assert_near(
+        padded_weights,
+        tf.zeros_like(padded_weights),
+        atol=1e-6,
     )
 
-    print("\nAll Full Model integration tests passed!")
+
+def test_independent_encoders(sample_inputs):
+    images, captions = sample_inputs
+    model = create_model()
+
+    image_embeddings = model.encode_image(images, training=False)
+
+    flat_captions = tf.reshape(captions, (-1, 12))
+    text_embeddings = model.encode_text(flat_captions, training=False)
+
+    assert tuple(image_embeddings.shape) == (2, 512)
+    assert tuple(text_embeddings.shape) == (6, 512)
 
 
-if __name__ == "__main__":
-    main()
+def test_full_model_gradient_flow(sample_inputs):
+    images, captions = sample_inputs
+    model = create_model()
+
+    with tf.GradientTape() as tape:
+        outputs = model(images, captions, training=True)
+
+        loss = (
+            1.0
+            - tf.reduce_mean(
+                tf.reduce_sum(
+                    outputs["image_embeddings"][:, tf.newaxis, :]
+                    * outputs["text_embeddings"],
+                    axis=-1,
+                )
+            )
+        )
+
+    gradients = tape.gradient(loss, model.trainable_variables)
+
+    assert gradients
+    assert all(gradient is not None for gradient in gradients)
+
+    for gradient in gradients:
+        tf.debugging.assert_all_finite(
+            gradient,
+            "Non-finite gradient detected",
+        )

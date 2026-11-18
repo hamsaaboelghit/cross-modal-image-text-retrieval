@@ -21,14 +21,7 @@ GALLERY_PATH = (
 
 
 class RetrievalService:
-    """
-    Integrates the TensorFlow model, retrieval gallery,
-    and RetrievalEngine.
-
-    Supports:
-        1. Text-to-Image retrieval.
-        2. Image-to-Text retrieval.
-    """
+    """Integrates the model, retrieval gallery, and retrieval engine."""
 
     def __init__(self):
         self.model_service = None
@@ -42,10 +35,7 @@ class RetrievalService:
                 "Run src/retrieval/build_gallery.py first."
             )
 
-        with np.load(
-            GALLERY_PATH,
-            allow_pickle=False,
-        ) as gallery_file:
+        with np.load(GALLERY_PATH, allow_pickle=False) as gallery_file:
             required_keys = {
                 "image_embeddings",
                 "text_embeddings",
@@ -55,28 +45,16 @@ class RetrievalService:
             }
 
             missing = required_keys - set(gallery_file.files)
-
             if missing:
-                raise ValueError(
-                    f"Gallery is missing keys: {missing}"
-                )
+                raise ValueError(f"Gallery is missing keys: {missing}")
 
-            image_embeddings = gallery_file[
-                "image_embeddings"
-            ].copy()
-
-            text_embeddings = gallery_file[
-                "text_embeddings"
-            ].copy()
-
-            image_names = gallery_file[
-                "image_names"
-            ].astype(str).tolist()
+            image_embeddings = gallery_file["image_embeddings"].copy()
+            text_embeddings = gallery_file["text_embeddings"].copy()
+            image_names = gallery_file["image_names"].astype(str).tolist()
 
             captions = json.loads(
                 str(gallery_file["captions_json"].item())
             )
-
             metadata = json.loads(
                 str(gallery_file["metadata_json"].item())
             )
@@ -101,33 +79,25 @@ class RetrievalService:
             raise ValueError("Unexpected gallery fold.")
 
         if metadata.get("test_set_used") is not False:
-            raise ValueError(
-                "Gallery must not contain test-set data."
-            )
+            raise ValueError("Gallery must not contain test-set data.")
 
         if metadata.get("embedding_dim") != 512:
-            raise ValueError(
-                "Unexpected gallery embedding dimension."
-            )
+            raise ValueError("Unexpected gallery embedding dimension.")
 
         image_count = len(image_names)
 
         if image_embeddings.shape != (image_count, 512):
             raise ValueError(
-                "Invalid image embeddings shape: "
-                f"{image_embeddings.shape}"
+                f"Invalid image embeddings shape: {image_embeddings.shape}"
             )
 
         if text_embeddings.shape != (image_count, 5, 512):
             raise ValueError(
-                "Invalid text embeddings shape: "
-                f"{text_embeddings.shape}"
+                f"Invalid text embeddings shape: {text_embeddings.shape}"
             )
 
         if len(captions) != image_count:
-            raise ValueError(
-                "Captions count does not match image count."
-            )
+            raise ValueError("Captions count does not match image count.")
 
         if len(image_names) != len(set(image_names)):
             raise ValueError("Duplicate image names detected.")
@@ -135,19 +105,23 @@ class RetrievalService:
         for index, image_captions in enumerate(captions):
             if len(image_captions) != 5:
                 raise ValueError(
-                    f"Image {image_names[index]} must have "
-                    "exactly 5 captions."
+                    f"Image {image_names[index]} must have exactly 5 captions."
                 )
 
         if not np.isfinite(image_embeddings).all():
-            raise ValueError(
-                "Non-finite image embeddings detected."
-            )
+            raise ValueError("Non-finite image embeddings detected.")
 
         if not np.isfinite(text_embeddings).all():
-            raise ValueError(
-                "Non-finite text embeddings detected."
-            )
+            raise ValueError("Non-finite text embeddings detected.")
+
+    @staticmethod
+    def _validate_top_k(top_k):
+        if (
+            not isinstance(top_k, int)
+            or isinstance(top_k, bool)
+            or not 1 <= top_k <= 50
+        ):
+            raise ValueError("top_k must be an integer between 1 and 50.")
 
     def load(self):
         if self.is_loaded:
@@ -198,26 +172,18 @@ class RetrievalService:
         self.gallery_metadata = metadata
 
         print("Retrieval Service loaded successfully.")
-
         return self
 
     def search_text(self, query: str, top_k: int = 5):
         if not self.is_loaded:
-            raise RuntimeError(
-                "Retrieval Service is not loaded."
-            )
+            raise RuntimeError("Retrieval Service is not loaded.")
 
         if not isinstance(query, str) or not query.strip():
-            raise ValueError(
-                "Query must be a non-empty string."
-            )
+            raise ValueError("Query must be a non-empty string.")
 
-        if not isinstance(top_k, int) or not 1 <= top_k <= 50:
-            raise ValueError("top_k must be between 1 and 50.")
+        self._validate_top_k(top_k)
 
-        query_embedding = (
-            self.model_service.get_text_embedding(query)
-        )
+        query_embedding = self.model_service.get_text_embedding(query)
 
         results = self.retrieval_engine.text_to_image(
             query_embedding=query_embedding,
@@ -228,19 +194,14 @@ class RetrievalService:
 
     def search_image(self, image: Image.Image, top_k: int = 5):
         if not self.is_loaded:
-            raise RuntimeError(
-                "Retrieval Service is not loaded."
-            )
+            raise RuntimeError("Retrieval Service is not loaded.")
 
         if not isinstance(image, Image.Image):
             raise TypeError("Expected a PIL Image.")
 
-        if not isinstance(top_k, int) or not 1 <= top_k <= 50:
-            raise ValueError("top_k must be between 1 and 50.")
+        self._validate_top_k(top_k)
 
-        query_embedding = (
-            self.model_service.get_image_embedding(image)
-        )
+        query_embedding = self.model_service.get_image_embedding(image)
 
         results = self.retrieval_engine.image_to_text(
             query_embedding=query_embedding,

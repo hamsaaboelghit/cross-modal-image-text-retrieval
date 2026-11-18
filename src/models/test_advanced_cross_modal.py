@@ -1,4 +1,5 @@
 
+import pytest
 import tensorflow as tf
 
 from src.models.full_model import CrossModalRetrievalModel
@@ -7,42 +8,42 @@ from src.training.matching_loss import MatchingBinaryCrossEntropyLoss
 from src.evaluation.matching_evaluator import MatchingEvaluator
 
 
-def test_advanced_model_forward():
+@pytest.fixture(scope="module")
+def images():
     tf.random.set_seed(42)
 
-    batch_size = 2
-    num_captions = 5
-    sequence_length = 34
-    vocab_size = 1000
-
-    images = tf.random.uniform(
-        (batch_size, 224, 224, 3),
+    return tf.random.uniform(
+        (2, 224, 224, 3),
         minval=0,
         maxval=255,
         dtype=tf.float32,
     )
 
-    captions = tf.random.uniform(
-        (batch_size, num_captions, sequence_length),
+
+@pytest.fixture(scope="module")
+def captions():
+    tf.random.set_seed(42)
+
+    values = tf.random.uniform(
+        (2, 5, 34),
         minval=4,
-        maxval=vocab_size,
+        maxval=1000,
         dtype=tf.int32,
     )
 
-    # Add padding to test the text mask.
-    captions = tf.concat(
+    return tf.concat(
         [
-            captions[:, :, :25],
-            tf.zeros(
-                (batch_size, num_captions, 9),
-                dtype=tf.int32,
-            ),
+            values[:, :, :25],
+            tf.zeros((2, 5, 9), dtype=tf.int32),
         ],
         axis=-1,
     )
 
-    model = CrossModalRetrievalModel(
-        vocab_size=vocab_size,
+
+@pytest.fixture(scope="module")
+def model(images, captions):
+    retrieval_model = CrossModalRetrievalModel(
+        vocab_size=1000,
         encoder_type="lstm",
         embedding_dim=300,
         hidden_dim=512,
@@ -55,6 +56,17 @@ def test_advanced_model_forward():
         cross_modal_dropout=0.1,
     )
 
+    retrieval_model(
+        images,
+        captions,
+        training=False,
+        return_attention=True,
+    )
+
+    return retrieval_model
+
+
+def test_advanced_model_forward(model, images, captions):
     outputs = model(
         images,
         captions,
@@ -62,30 +74,12 @@ def test_advanced_model_forward():
         return_attention=True,
     )
 
-    assert tuple(outputs["image_embeddings"].shape) == (
-        batch_size,
-        512,
-    )
-
-    assert tuple(outputs["text_embeddings"].shape) == (
-        batch_size,
-        num_captions,
-        512,
-    )
-
-    assert tuple(outputs["matching_scores"].shape) == (
-        batch_size,
-        num_captions,
-    )
-
+    assert tuple(outputs["image_embeddings"].shape) == (2, 512)
+    assert tuple(outputs["text_embeddings"].shape) == (2, 5, 512)
+    assert tuple(outputs["matching_scores"].shape) == (2, 5)
     assert tuple(
         outputs["cross_modal_attention_weights"].shape
-    ) == (
-        batch_size,
-        num_captions,
-        sequence_length,
-        49,
-    )
+    ) == (2, 5, 34, 49)
 
     for key in (
         "image_embeddings",
@@ -98,33 +92,24 @@ def test_advanced_model_forward():
             f"{key} contains NaN or Inf.",
         )
 
-    print("Advanced model forward pass: PASS")
-    print("Image embeddings shape: PASS")
-    print("Text embeddings shape: PASS")
-    print("Matching scores shape: PASS")
-    print("Cross-modal attention shape: PASS")
-
-    return model, images, captions
-
 
 def test_matching_loss_gradient_flow(model, images, captions):
     retrieval_loss_fn = MultiPositiveInfoNCELoss(
         temperature=0.07,
     )
-
     matching_loss_fn = MatchingBinaryCrossEntropyLoss()
+
+    negative_images = tf.roll(
+        images,
+        shift=1,
+        axis=0,
+    )
 
     with tf.GradientTape() as tape:
         positive_outputs = model(
             images,
             captions,
             training=True,
-        )
-
-        negative_images = tf.roll(
-            images,
-            shift=1,
-            axis=0,
         )
 
         negative_outputs = model(
@@ -150,42 +135,25 @@ def test_matching_loss_gradient_flow(model, images, captions):
         model.trainable_variables,
     )
 
-    assert len(gradients) > 0
-
+    assert gradients
     connected_gradients = [
-        gradient
-        for gradient in gradients
+        gradient for gradient in gradients
         if gradient is not None
     ]
-
-    assert connected_gradients, (
-        "No gradients were connected to model variables."
-    )
+    assert connected_gradients
 
     for gradient in connected_gradients:
         tf.debugging.assert_all_finite(
             gradient,
-            "A gradient contains NaN or Inf.",
+            "A model gradient contains NaN or Inf.",
         )
 
-    # Explicitly verify that the matching head receives gradients.
-    matching_head_variables = (
-        model.matching_head.trainable_variables
-    )
-
-    matching_head_gradients = tape.gradient(
-        total_loss,
-        matching_head_variables,
-    ) if False else None
-
-    # Use a second tape to inspect matching-head gradients directly.
     with tf.GradientTape() as matching_tape:
         positive_outputs = model(
             images,
             captions,
             training=True,
         )
-
         negative_outputs = model(
             negative_images,
             captions,
@@ -199,14 +167,11 @@ def test_matching_loss_gradient_flow(model, images, captions):
 
     matching_gradients = matching_tape.gradient(
         matching_only_loss,
-        matching_head_variables,
+        model.matching_head.trainable_variables,
     )
 
     assert matching_gradients
-    assert all(
-        gradient is not None
-        for gradient in matching_gradients
-    )
+    assert all(g is not None for g in matching_gradients)
 
     for gradient in matching_gradients:
         tf.debugging.assert_all_finite(
@@ -214,18 +179,12 @@ def test_matching_loss_gradient_flow(model, images, captions):
             "Matching head gradient contains NaN or Inf.",
         )
 
-    # Cross-modal attention must also receive matching-loss gradients.
-    attention_variables = (
-        model.cross_modal_attention.trainable_variables
-    )
-
     with tf.GradientTape() as attention_tape:
         positive_outputs = model(
             images,
             captions,
             training=True,
         )
-
         negative_outputs = model(
             negative_images,
             captions,
@@ -239,14 +198,11 @@ def test_matching_loss_gradient_flow(model, images, captions):
 
     attention_gradients = attention_tape.gradient(
         attention_loss,
-        attention_variables,
+        model.cross_modal_attention.trainable_variables,
     )
 
     assert attention_gradients
-    assert all(
-        gradient is not None
-        for gradient in attention_gradients
-    )
+    assert all(g is not None for g in attention_gradients)
 
     for gradient in attention_gradients:
         tf.debugging.assert_all_finite(
@@ -254,29 +210,9 @@ def test_matching_loss_gradient_flow(model, images, captions):
             "Cross-modal attention gradient contains NaN or Inf.",
         )
 
-    tf.debugging.assert_all_finite(
-        retrieval_loss,
-        "Retrieval loss is not finite.",
-    )
-
-    tf.debugging.assert_all_finite(
-        matching_loss,
-        "Matching loss is not finite.",
-    )
-
-    tf.debugging.assert_all_finite(
-        total_loss,
-        "Total loss is not finite.",
-    )
-
-    print(f"Retrieval loss: {retrieval_loss.numpy():.4f}")
-    print(f"Matching loss: {matching_loss.numpy():.4f}")
-    print(f"Total loss: {total_loss.numpy():.4f}")
-
-    print("Combined loss is finite: PASS")
-    print("Model gradient flow: PASS")
-    print("Matching head gradient flow: PASS")
-    print("Cross-modal attention gradient flow: PASS")
+    tf.debugging.assert_all_finite(retrieval_loss, "Invalid retrieval loss.")
+    tf.debugging.assert_all_finite(matching_loss, "Invalid matching loss.")
+    tf.debugging.assert_all_finite(total_loss, "Invalid total loss.")
 
 
 def test_matching_evaluator(model, images, captions):
@@ -313,41 +249,9 @@ def test_matching_evaluator(model, images, captions):
         "precision",
         "recall",
         "f1_score",
-        "matching_loss",
     ):
-        value = metrics[metric_name]
-        assert 0.0 <= value <= 1.0 if metric_name != "matching_loss" else value >= 0.0
+        assert 0.0 <= metrics[metric_name] <= 1.0
 
+    assert metrics["matching_loss"] >= 0.0
     assert metrics["num_positive_pairs"] == 10
     assert metrics["num_negative_pairs"] == 10
-
-    print("Matching evaluator: PASS")
-    print("Evaluation metrics:", metrics)
-
-
-def run_tests():
-    print("=" * 65)
-    print("ADVANCED CROSS-MODAL ARCHITECTURE TESTS")
-    print("=" * 65)
-
-    model, images, captions = test_advanced_model_forward()
-
-    test_matching_loss_gradient_flow(
-        model,
-        images,
-        captions,
-    )
-
-    test_matching_evaluator(
-        model,
-        images,
-        captions,
-    )
-
-    print("=" * 65)
-    print("ALL ADVANCED ARCHITECTURE TESTS PASSED")
-    print("=" * 65)
-
-
-if __name__ == "__main__":
-    run_tests()

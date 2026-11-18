@@ -9,7 +9,7 @@ Pillow>=10.0,<12.0
 opencv-python>=4.9,<5.0
 tqdm>=4.66,<5.0
 
-# Deep learning (native Windows CPU)
+# Deep learning
 tensorflow==2.16.2
 
 # Backend and API
@@ -20,3 +20,4 @@ python-multipart>=0.0.9
 # Testing
 pytest>=8.0,<9.0
 httpx>=0.27,<1.0
+httpx2
