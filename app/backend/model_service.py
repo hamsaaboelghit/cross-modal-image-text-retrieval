@@ -1,5 +1,4 @@
 
-import json
 import os
 import re
 from pathlib import Path
@@ -8,6 +7,7 @@ import numpy as np
 import tensorflow as tf
 from PIL import Image
 
+from src.data.vocabulary import load_vocabulary
 from src.models.full_model import CrossModalRetrievalModel
 from src.models.baseline_model import BaselineRetrievalModel
 
@@ -52,6 +52,7 @@ VOCAB_PATH = Path(
 
 IMAGE_SIZE = 224
 MAX_LENGTH = 34
+NUM_CAPTIONS = 5
 EMBEDDING_DIM = 512
 
 
@@ -65,118 +66,156 @@ class ModelService:
         self.checkpoint_info = {}
         self.model_type = MODEL_TYPE
 
+    # --------------------------------------------------
+    # Vocabulary
+    # --------------------------------------------------
+
     def _load_vocabulary(self):
-        if not VOCAB_PATH.is_file():
-            raise FileNotFoundError(
-                f"Vocabulary not found: {VOCAB_PATH}"
-            )
+        self.vocabulary = load_vocabulary(VOCAB_PATH)
 
-        with VOCAB_PATH.open(
-            "r",
-            encoding="utf-8",
-        ) as file:
-            vocabulary = json.load(file)
+        print(
+            "Vocabulary loaded. Size:",
+            len(self.vocabulary),
+        )
 
-        if not isinstance(vocabulary, dict):
-            raise TypeError(
-                "Vocabulary must be a dictionary."
-            )
-
-        required_tokens = {
-            "<PAD>",
-            "<UNK>",
-            "<BOS>",
-            "<EOS>",
-        }
-
-        missing = required_tokens - vocabulary.keys()
-
-        if missing:
-            raise ValueError(
-                f"Vocabulary is missing special tokens: {missing}"
-            )
-
-        token_ids = list(vocabulary.values())
-
-        if not all(
-            isinstance(token_id, int) and token_id >= 0
-            for token_id in token_ids
-        ):
-            raise ValueError(
-                "Vocabulary token IDs must be non-negative integers."
-            )
-
-        if len(set(token_ids)) != len(token_ids):
-            raise ValueError(
-                "Vocabulary contains duplicate token IDs."
-            )
-
-        self.vocabulary = vocabulary
+    # --------------------------------------------------
+    # Checkpoint resolution
+    # --------------------------------------------------
 
     @staticmethod
-    def _checkpoint_from_directory(directory):
+    def _is_valid_checkpoint_prefix(prefix):
+        prefix = Path(prefix)
+
+        index_file = Path(str(prefix) + ".index")
+
+        data_files = list(
+            prefix.parent.glob(
+                prefix.name + ".data-*"
+            )
+        )
+
+        return index_file.is_file() and bool(data_files)
+
+    @classmethod
+    def _checkpoint_from_directory(cls, directory):
         directory = Path(directory)
 
         if not directory.is_dir():
             return None
 
-        return tf.train.latest_checkpoint(str(directory))
+        checkpoint = tf.train.latest_checkpoint(
+            str(directory)
+        )
+
+        if (
+            checkpoint is not None
+            and cls._is_valid_checkpoint_prefix(checkpoint)
+        ):
+            return checkpoint
+
+        # Fallback for directories where checkpoint state
+        # metadata is missing but checkpoint files exist.
+        index_files = list(
+            directory.glob("*.index")
+        )
+
+        if not index_files:
+            return None
+
+        index_files.sort(
+            key=lambda item: item.stat().st_mtime,
+            reverse=True,
+        )
+
+        for index_file in index_files:
+            prefix = str(index_file)[:-6]
+
+            if cls._is_valid_checkpoint_prefix(prefix):
+                return prefix
+
+        return None
 
     def _resolve_checkpoint(self):
+        if CHECKPOINT_KIND not in {"best", "latest"}:
+            raise ValueError(
+                "VISIONMATCH_CHECKPOINT_KIND must be "
+                "'best' or 'latest'."
+            )
+
         path = CHECKPOINT_DIR.expanduser()
 
         if not path.is_absolute():
             path = PROJECT_ROOT / path
 
-        if not path.exists():
+        # Case 1: A direct .index file was supplied.
+        if path.suffix == ".index":
+            prefix = str(path)[:-6]
+
+            if self._is_valid_checkpoint_prefix(prefix):
+                return prefix
+
             raise FileNotFoundError(
-                f"Checkpoint path does not exist: {path}"
+                f"Incomplete TensorFlow checkpoint: {path}"
             )
 
-        # The environment variable may point directly to a checkpoint prefix.
-        if path.is_file() and str(path).endswith(".index"):
-            return str(path)[:-6]
-
-        if path.is_file():
+        # Case 2: A direct checkpoint prefix was supplied.
+        if self._is_valid_checkpoint_prefix(path):
             return str(path)
 
-        # Or it may point to an experiment root, latest/, or best/.
-        if self._checkpoint_from_directory(path) is not None:
-            return self._checkpoint_from_directory(path)
+        # Case 3: A directory was supplied.
+        if not path.is_dir():
+            raise FileNotFoundError(
+                f"Checkpoint path does not exist "
+                f"or is not a valid checkpoint: {path}"
+            )
 
-        if self.model_type == "baseline":
-            preferred_kinds = [CHECKPOINT_KIND, "best", "latest"]
-        else:
-            preferred_kinds = [CHECKPOINT_KIND, "best", "latest"]
+        # First, check whether this directory itself contains
+        # a TensorFlow checkpoint.
+        direct_checkpoint = (
+            self._checkpoint_from_directory(path)
+        )
 
-        checked = set()
+        if direct_checkpoint is not None:
+            return direct_checkpoint
 
-        for kind in preferred_kinds:
-            if kind in checked:
-                continue
+        # Otherwise, search the requested subdirectory first,
+        # then fall back to the other checkpoint type.
+        fallback_kind = (
+            "latest"
+            if CHECKPOINT_KIND == "best"
+            else "best"
+        )
 
-            checked.add(kind)
-
-            if kind not in {"best", "latest"}:
-                continue
-
+        for kind in (CHECKPOINT_KIND, fallback_kind):
             candidate_dir = path / kind
-            checkpoint = self._checkpoint_from_directory(
-                candidate_dir
+
+            checkpoint = (
+                self._checkpoint_from_directory(
+                    candidate_dir
+                )
             )
 
             if checkpoint is not None:
                 return checkpoint
 
         raise FileNotFoundError(
-            "No TensorFlow checkpoint was found.\n"
-            f"Checked: {path}\n"
-            f"Also checked: {path / 'best'} and {path / 'latest'}\n"
-            "Set VISIONMATCH_CHECKPOINT_DIR to the experiment "
-            "directory, a checkpoint directory, or a checkpoint prefix."
+            "No complete TensorFlow checkpoint was found.\n"
+            f"Experiment directory: {path}\n"
+            f"Checked: {path / CHECKPOINT_KIND}\n"
+            f"Checked: {path / fallback_kind}\n"
+            "Make sure both .index and .data files exist."
         )
 
+    # --------------------------------------------------
+    # Model construction
+    # --------------------------------------------------
+
     def _build_model(self):
+        if self.vocabulary is None:
+            raise RuntimeError(
+                "Load the vocabulary before building the model."
+            )
+
         vocab_size = len(self.vocabulary)
 
         if self.model_type == "baseline":
@@ -223,17 +262,28 @@ class ModelService:
                 f"Unsupported model type: {self.model_type}"
             )
 
-        # Build model variables before restoring checkpoint weights.
+        # The text encoders reject captions containing only PAD.
+        # Build valid dummy captions using the real vocabulary IDs.
+        pad_id = self.vocabulary["<PAD>"]
+        bos_id = self.vocabulary["<BOS>"]
+        eos_id = self.vocabulary["<EOS>"]
+
+        valid_caption = (
+            [bos_id, eos_id]
+            + [pad_id] * (MAX_LENGTH - 2)
+        )
+
+        dummy_captions = tf.constant(
+            [[valid_caption] * NUM_CAPTIONS],
+            dtype=tf.int32,
+        )
+
         dummy_images = tf.zeros(
             (1, IMAGE_SIZE, IMAGE_SIZE, 3),
             dtype=tf.float32,
         )
 
-        dummy_captions = tf.zeros(
-            (1, 5, MAX_LENGTH),
-            dtype=tf.int32,
-        )
-
+        # Build all model variables before restoring weights.
         model(
             dummy_images,
             dummy_captions,
@@ -241,6 +291,10 @@ class ModelService:
         )
 
         return model
+
+    # --------------------------------------------------
+    # Loading and restoring
+    # --------------------------------------------------
 
     def load(self):
         if self.is_loaded:
@@ -250,37 +304,55 @@ class ModelService:
         self._load_vocabulary()
 
         print("Building TensorFlow model...")
-        self.model = self._build_model()
+        model = self._build_model()
 
         print("Resolving TensorFlow checkpoint...")
-        self.checkpoint_path = self._resolve_checkpoint()
+        checkpoint_path = self._resolve_checkpoint()
 
         print("Restoring model weights...")
-
         checkpoint = tf.train.Checkpoint(
-            model=self.model,
+            model=model,
         )
 
         status = checkpoint.restore(
-            self.checkpoint_path
+            checkpoint_path
         )
 
-        # Training checkpoints can also contain optimizer and state variables.
+        # Ensure that at least one checkpoint object matched,
+        # and that all existing model variables were restored.
+        status.assert_nontrivial_match()
+        status.assert_existing_objects_matched()
+
+        # The training checkpoint also contains optimizer and
+        # training-state variables that are not needed for inference.
         status.expect_partial()
+
+        # Mark the service as loaded only after successful restore.
+        self.model = model
+        self.checkpoint_path = checkpoint_path
+
+        checkpoint_kind = Path(
+            checkpoint_path
+        ).parent.name
 
         self.checkpoint_info = {
             "model_type": self.model_type,
-            "checkpoint_path": self.checkpoint_path,
-            "checkpoint_kind": CHECKPOINT_KIND,
+            "checkpoint_path": checkpoint_path,
+            "checkpoint_kind": checkpoint_kind,
             "vocab_size": len(self.vocabulary),
             "embedding_dim": EMBEDDING_DIM,
         }
 
         print("TensorFlow model loaded successfully.")
         print("Model type:", self.model_type)
-        print("Checkpoint:", self.checkpoint_path)
+        print("Checkpoint kind:", checkpoint_kind)
+        print("Checkpoint:", checkpoint_path)
 
         return self
+
+    # --------------------------------------------------
+    # Text preprocessing
+    # --------------------------------------------------
 
     def _tokenize(self, caption):
         if (
@@ -291,6 +363,8 @@ class ModelService:
                 "Caption must be a non-empty string."
             )
 
+        # Keep exactly the same tokenization rule used by
+        # build_vocabulary.py and encode_captions.py.
         tokens = re.findall(
             r"\w+|[^\w\s]",
             caption.lower(),
@@ -312,14 +386,20 @@ class ModelService:
             self.vocabulary["<EOS>"]
         )
 
+        # Match encode_captions.py truncation:
+        # retain MAX_LENGTH - 1 tokens, then force EOS.
         if len(encoded) > MAX_LENGTH:
-            encoded = encoded[:MAX_LENGTH]
-            encoded[-1] = self.vocabulary["<EOS>"]
+            encoded = encoded[:MAX_LENGTH - 1]
+            encoded.append(
+                self.vocabulary["<EOS>"]
+            )
 
         padding_id = self.vocabulary["<PAD>"]
 
         encoded.extend(
-            [padding_id] * (MAX_LENGTH - len(encoded))
+            [padding_id] * (
+                MAX_LENGTH - len(encoded)
+            )
         )
 
         return tf.convert_to_tensor(
@@ -359,12 +439,17 @@ class ModelService:
             axis=-1,
         )
 
+    # --------------------------------------------------
+    # Image preprocessing
+    # --------------------------------------------------
+
     def preprocess_image(self, image):
         if not isinstance(image, Image.Image):
             raise TypeError(
                 "Expected a PIL Image."
             )
 
+        # Match Flickr30kDataset preprocessing exactly.
         image = image.convert("RGB")
 
         image = image.resize(
@@ -377,6 +462,8 @@ class ModelService:
             dtype=np.float32,
         )
 
+        # Keep pixel values in [0, 255].
+        # The model encoder handles its own normalization.
         return tf.convert_to_tensor(
             image_array[np.newaxis, ...],
             dtype=tf.float32,
@@ -406,11 +493,16 @@ class ModelService:
             axis=-1,
         )
 
+    # --------------------------------------------------
+    # Service state
+    # --------------------------------------------------
+
     @property
     def is_loaded(self):
         return (
             self.model is not None
             and self.vocabulary is not None
+            and self.checkpoint_path is not None
         )
 
 

@@ -1,15 +1,35 @@
 
+import argparse
 import json
+import math
 from pathlib import Path
 
 import tensorflow as tf
 
-from src.data.flickr30k_dataset import Flickr30kDataset
+from src.data.flickr30k_dataset import (
+    Flickr30kDataset,
+    IMAGE_SIZE,
+    EXPECTED_CAPTIONS,
+    MAX_LENGTH,
+)
+from src.data.vocabulary import load_vocabulary
+from src.models.baseline_model import BaselineRetrievalModel
 from src.models.full_model import CrossModalRetrievalModel
+from src.training.train_config import TrainingConfig
 from src.evaluation.retrieval_evaluator import RetrievalEvaluator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+FOLD = 1
+SEED = 42
+
+BATCH_SIZE = 8
+EMBEDDING_DIM = 512
+
+QUERY_BATCH_SIZE = 32
+CANDIDATE_CHUNK_SIZE = 8192
+RETRIEVAL_KS = (1, 5, 10)
 
 VOCAB_PATH = (
     PROJECT_ROOT
@@ -17,120 +37,328 @@ VOCAB_PATH = (
     / "processed"
     / "flickr30k"
     / "vocabularies"
-    / "fold_1_vocab.json"
+    / f"fold_{FOLD}_vocab.json"
 )
-
-IMAGE_SIZE = 224
-MAX_LENGTH = 34
-NUM_CAPTIONS = 5
-FOLD = 1
-SEED = 42
 
 
 EXPERIMENTS = {
+    "baseline": {
+        "model_type": "baseline",
+        "model_name": "CNN-Baseline",
+        "encoder_type": None,
+        "use_cross_modal_attention": False,
+        "pretrained": False,
+        "unfreeze_last_block": False,
+        "embedding_dim": 300,
+        "output_dim": 512,
+        "dropout": 0.1,
+        "checkpoint_dir": (
+            "checkpoints/experiments/baseline_fold1_seed42"
+        ),
+        "output_dir": (
+            "results/experiments/baseline_fold1_seed42"
+        ),
+    },
     "gru": {
+        "model_type": "full",
+        "model_name": "ResNet50-GRU",
         "encoder_type": "gru",
         "use_cross_modal_attention": False,
+        "pretrained": True,
+        "unfreeze_last_block": False,
+        "embedding_dim": 300,
+        "hidden_dim": 512,
+        "num_layers": 1,
+        "dropout": 0.2,
+        "bidirectional": False,
+        "use_attention": True,
         "checkpoint_dir": (
             "checkpoints/experiments/gru_fold1_seed42"
         ),
         "output_dir": (
             "results/experiments/gru_fold1_seed42"
         ),
-        "model_name": "ResNet50-GRU",
     },
     "transformer": {
+        "model_type": "full",
+        "model_name": "ResNet50-Transformer",
         "encoder_type": "transformer",
         "use_cross_modal_attention": False,
+        "pretrained": True,
+        "unfreeze_last_block": False,
+        "embedding_dim": 300,
+        "hidden_dim": 512,
+        "num_layers": 1,
+        "dropout": 0.2,
+        "bidirectional": False,
+        "use_attention": True,
         "checkpoint_dir": (
             "checkpoints/experiments/transformer_fold1_seed42"
         ),
         "output_dir": (
             "results/experiments/transformer_fold1_seed42"
         ),
-        "model_name": "ResNet50-Transformer",
     },
     "cross_attention": {
+        "model_type": "full",
+        "model_name": "ResNet50-Cross-Modal-Attention",
         "encoder_type": "lstm",
         "use_cross_modal_attention": True,
+        "pretrained": True,
+        "unfreeze_last_block": False,
+        "embedding_dim": 300,
+        "hidden_dim": 512,
+        "num_layers": 1,
+        "dropout": 0.2,
+        "bidirectional": False,
+        "use_attention": True,
         "checkpoint_dir": (
             "checkpoints/experiments/cross_attention_fold1_seed42"
         ),
         "output_dir": (
             "results/experiments/cross_attention_fold1_seed42"
         ),
-        "model_name": "ResNet50-Cross-Modal-Attention",
-    },
-    "real": {
-        "encoder_type": "lstm",
-        "use_cross_modal_attention": False,
-        "checkpoint_dir": "checkpoints/real_fold1",
-        "output_dir": "results/real_fold1",
-        "model_name": "ResNet50-LSTM",
     },
 }
 
 
-def load_vocabulary():
-    if not VOCAB_PATH.is_file():
-        raise FileNotFoundError(
-            f"Vocabulary file not found: {VOCAB_PATH}"
-        )
+def set_reproducibility():
+    tf.keras.utils.set_random_seed(SEED)
 
-    with VOCAB_PATH.open(
-        "r",
-        encoding="utf-8",
-    ) as file:
-        vocabulary = json.load(file)
 
-    if not isinstance(vocabulary, dict):
-        raise TypeError(
-            "Vocabulary must be a dictionary."
-        )
-
-    required_tokens = {
-        "<PAD>",
-        "<UNK>",
-        "<BOS>",
-        "<EOS>",
+def validate_shared_configuration():
+    expected = {
+        "image_size": 224,
+        "captions_per_image": 5,
+        "max_length": 34,
+        "embedding_dim": 512,
+        "fold": 1,
+        "seed": 42,
+        "batch_size": 8,
     }
 
-    missing = required_tokens - vocabulary.keys()
+    actual = {
+        "image_size": IMAGE_SIZE,
+        "captions_per_image": EXPECTED_CAPTIONS,
+        "max_length": MAX_LENGTH,
+        "embedding_dim": EMBEDDING_DIM,
+        "fold": FOLD,
+        "seed": SEED,
+        "batch_size": BATCH_SIZE,
+    }
 
-    if missing:
-        raise ValueError(
-            f"Vocabulary is missing special tokens: {missing}"
-        )
+    for key, expected_value in expected.items():
+        if actual[key] != expected_value:
+            raise ValueError(
+                f"Configuration mismatch for {key}: "
+                f"expected {expected_value}, found {actual[key]}."
+            )
+
+        print(f"[PASS] {key}: {actual[key]}")
+
+
+def load_project_vocabulary():
+    vocabulary = load_vocabulary(VOCAB_PATH)
+
+    print("[PASS] Vocabulary loaded and validated.")
+    print("Vocabulary size:", len(vocabulary))
 
     return vocabulary
 
 
-def build_model(vocab_size, config):
-    model = CrossModalRetrievalModel(
-        vocab_size=vocab_size,
-        encoder_type=config["encoder_type"],
-        embedding_dim=300,
-        hidden_dim=512,
-        num_layers=1,
-        dropout=0.2,
-        bidirectional=False,
-        use_attention=True,
-        pretrained=False,
-        unfreeze_last_block=False,
-        use_cross_modal_attention=config[
-            "use_cross_modal_attention"
-        ],
+def build_expected_training_config(experiment_name):
+    return TrainingConfig(
+        epochs=5,
+        batch_size=BATCH_SIZE,
+        learning_rate=1e-4,
+        weight_decay=1e-4,
+        optimizer="adamw",
+        scheduler="none",
+        loss_type="info_nce",
+        temperature=0.07,
+        seed=SEED,
+        fold=FOLD,
+        checkpoint_dir=EXPERIMENTS[
+            experiment_name
+        ]["checkpoint_dir"],
+        log_dir="runs",
+        save_best_only=True,
+        early_stopping_patience=3,
+        early_stopping_min_delta=0.001,
+    ).to_dict()
+
+
+def validate_training_config(metadata, experiment_name):
+    if "config" not in metadata:
+        raise ValueError(
+            "Checkpoint metadata does not contain training config."
+        )
+
+    saved_config = metadata["config"]
+
+    if not isinstance(saved_config, dict):
+        raise TypeError(
+            "Checkpoint training config must be a dictionary."
+        )
+
+    expected_config = build_expected_training_config(
+        experiment_name
     )
 
-    # Build all variables before restoring the checkpoint.
+    # Older checkpoints may not contain this field.
+    # It is not used by the current InfoNCE training pipeline.
+    legacy_optional_fields = {"matching_loss_weight"}
+
+    mismatches = []
+    unrecorded_fields = []
+
+    for key, expected_value in expected_config.items():
+        if key not in saved_config:
+            if key in legacy_optional_fields:
+                unrecorded_fields.append(key)
+                continue
+
+            mismatches.append(
+                f"{key}: missing from checkpoint metadata"
+            )
+            continue
+
+        actual_value = saved_config[key]
+
+        if isinstance(expected_value, float):
+            try:
+                matches = math.isclose(
+                    float(actual_value),
+                    expected_value,
+                    rel_tol=1e-7,
+                    abs_tol=1e-9,
+                )
+            except (TypeError, ValueError):
+                matches = False
+        else:
+            matches = actual_value == expected_value
+
+        if not matches:
+            mismatches.append(
+                f"{key}: expected {expected_value}, "
+                f"found {actual_value}"
+            )
+
+    if mismatches:
+        details = "\n".join(
+            f"- {item}" for item in mismatches
+        )
+
+        raise ValueError(
+            "Training/Evaluation configuration mismatch:\n"
+            f"{details}"
+        )
+
+    print(
+        "[PASS] All recorded training configuration fields match."
+    )
+    print("[PASS] Epochs, batch size and learning rate match.")
+    print("[PASS] Optimizer and scheduler match.")
+    print("[PASS] Loss configuration matches.")
+    print("[PASS] Fold and seed match.")
+    print("[PASS] Checkpoint directory matches.")
+
+    for key in unrecorded_fields:
+        print(
+            f"[NOT RECORDED] {key}: "
+            "not present in this checkpoint's metadata; "
+            "it was not used by the current training loss."
+        )
+
+    if unrecorded_fields:
+        print(
+            "[NOTE] Configuration parity is verified for all "
+            "recorded fields; unrecorded legacy fields are "
+            "not claimed as verified."
+        )
+
+
+def validate_architecture_config(config):
+    if config["model_type"] == "baseline":
+        expected = {
+            "embedding_dim": 300,
+            "output_dim": 512,
+            "dropout": 0.1,
+        }
+
+        for key, value in expected.items():
+            if config[key] != value:
+                raise ValueError(
+                    f"Baseline architecture mismatch: {key}"
+                )
+
+    elif config["model_type"] == "full":
+        expected = {
+            "embedding_dim": 300,
+            "hidden_dim": 512,
+            "num_layers": 1,
+            "dropout": 0.2,
+            "bidirectional": False,
+            "use_attention": True,
+            "pretrained": True,
+            "unfreeze_last_block": False,
+        }
+
+        for key, value in expected.items():
+            if config[key] != value:
+                raise ValueError(
+                    f"Full model architecture mismatch: {key}"
+                )
+
+    else:
+        raise ValueError(
+            f"Unsupported model type: {config['model_type']}"
+        )
+
+    print("[PASS] Architecture configuration matches training.")
+
+    if config["model_type"] == "full":
+        print("[PASS] Encoder type:", config["encoder_type"])
+        print(
+            "[PASS] Cross-modal attention:",
+            config["use_cross_modal_attention"],
+        )
+
+
+def build_model(vocab_size, config):
+    if config["model_type"] == "baseline":
+        model = BaselineRetrievalModel(
+            vocab_size=vocab_size,
+            embedding_dim=config["embedding_dim"],
+            output_dim=config["output_dim"],
+            dropout=config["dropout"],
+        )
+
+    else:
+        model = CrossModalRetrievalModel(
+            vocab_size=vocab_size,
+            encoder_type=config["encoder_type"],
+            embedding_dim=config["embedding_dim"],
+            hidden_dim=config["hidden_dim"],
+            num_layers=config["num_layers"],
+            dropout=config["dropout"],
+            bidirectional=config["bidirectional"],
+            use_attention=config["use_attention"],
+            pretrained=config["pretrained"],
+            unfreeze_last_block=config["unfreeze_last_block"],
+            use_cross_modal_attention=config[
+                "use_cross_modal_attention"
+            ],
+        )
+
     dummy_images = tf.zeros(
         (1, IMAGE_SIZE, IMAGE_SIZE, 3),
         dtype=tf.float32,
     )
 
-    dummy_captions = tf.zeros(
-        (1, NUM_CAPTIONS, MAX_LENGTH),
-        dtype=tf.int32,
+    dummy_captions = tf.fill(
+        (1, EXPECTED_CAPTIONS, MAX_LENGTH),
+        tf.constant(4, dtype=tf.int32),
     )
 
     model(
@@ -142,14 +370,10 @@ def build_model(vocab_size, config):
     return model
 
 
-def resolve_checkpoint(checkpoint_dir, checkpoint_kind="best"):
-    """
-    Resolve a checkpoint from:
-      - experiment root containing best/ and latest/
-      - direct best/ or latest/ directory
-      - direct TensorFlow checkpoint prefix
-    """
-
+def resolve_checkpoint(
+    checkpoint_dir,
+    checkpoint_kind="best",
+):
     checkpoint_dir = Path(checkpoint_dir)
 
     if not checkpoint_dir.is_absolute():
@@ -168,12 +392,11 @@ def resolve_checkpoint(checkpoint_dir, checkpoint_kind="best"):
 
         if not Path(checkpoint_path + ".index").is_file():
             raise FileNotFoundError(
-                f"Invalid TensorFlow checkpoint prefix: {checkpoint_path}"
+                f"Invalid TensorFlow checkpoint: {checkpoint_path}"
             )
 
         return checkpoint_path
 
-    # If the supplied path is itself a checkpoint directory.
     direct_checkpoint = tf.train.latest_checkpoint(
         str(checkpoint_dir)
     )
@@ -205,10 +428,32 @@ def resolve_checkpoint(checkpoint_dir, checkpoint_kind="best"):
             return checkpoint_path
 
     raise FileNotFoundError(
-        "No TensorFlow checkpoint found.\n"
-        f"Experiment directory: {checkpoint_dir}\n"
-        f"Checked directories: {preferred}"
+        f"No TensorFlow checkpoint found in {checkpoint_dir}."
     )
+
+
+def load_checkpoint_metadata(checkpoint_path):
+    metadata_path = Path(
+        str(checkpoint_path) + ".json"
+    )
+
+    if not metadata_path.is_file():
+        raise FileNotFoundError(
+            f"Checkpoint metadata not found: {metadata_path}"
+        )
+
+    with metadata_path.open(
+        "r",
+        encoding="utf-8",
+    ) as file:
+        metadata = json.load(file)
+
+    if not isinstance(metadata, dict):
+        raise ValueError(
+            "Checkpoint metadata must be a JSON object."
+        )
+
+    return metadata
 
 
 def restore_model(model, checkpoint_path):
@@ -216,66 +461,53 @@ def restore_model(model, checkpoint_path):
         model=model,
     )
 
-    status = checkpoint.restore(
-        checkpoint_path
-    )
+    status = checkpoint.restore(checkpoint_path)
 
-    # The training checkpoint may also contain optimizer and state variables.
+    status.assert_existing_objects_matched()
     status.expect_partial()
+
+    print("[PASS] Model weights restored.")
 
     return model
 
 
-def load_checkpoint_metadata(checkpoint_path):
-    """
-    Metadata is saved beside the checkpoint prefix:
-        latest_checkpoint-5.json
-        best_model-5.json
-    """
-
-    metadata_path = Path(
-        str(checkpoint_path) + ".json"
+def build_validation_dataset():
+    validation_data = Flickr30kDataset(
+        fold_number=FOLD,
+        split="validation",
     )
 
-    if not metadata_path.is_file():
-        print(
-            "Warning: No metadata file found for this checkpoint."
-        )
-        return {}
+    validation_dataset = validation_data.as_dataset(
+        batch_size=BATCH_SIZE,
+        shuffle=False,
+        drop_remainder=False,
+        prefetch=True,
+        seed=SEED,
+    )
 
-    try:
-        with metadata_path.open(
-            "r",
-            encoding="utf-8",
-        ) as file:
-            metadata = json.load(file)
+    print("Validation images:", len(validation_data))
+    print("Batch size:", BATCH_SIZE)
+    print("Shuffle:", False)
+    print("Drop remainder:", False)
 
-        if not isinstance(metadata, dict):
-            raise ValueError(
-                "Checkpoint metadata must be a JSON object."
-            )
-
-        return metadata
-
-    except (json.JSONDecodeError, OSError) as error:
-        print(
-            f"Warning: Could not read checkpoint metadata: {error}"
-        )
-        return {}
+    return validation_data, validation_dataset
 
 
-def _to_json_safe(value):
+def to_json_safe(value):
     if isinstance(value, dict):
         return {
-            str(key): _to_json_safe(item)
+            str(key): to_json_safe(item)
             for key, item in value.items()
         }
 
     if isinstance(value, (list, tuple)):
         return [
-            _to_json_safe(item)
+            to_json_safe(item)
             for item in value
         ]
+
+    if isinstance(value, Path):
+        return str(value)
 
     if hasattr(value, "item"):
         try:
@@ -283,10 +515,10 @@ def _to_json_safe(value):
         except (ValueError, TypeError):
             pass
 
-    if isinstance(value, Path):
-        return str(value)
-
-    if isinstance(value, (str, int, float, bool)) or value is None:
+    if isinstance(
+        value,
+        (str, int, float, bool),
+    ) or value is None:
         return value
 
     return str(value)
@@ -294,6 +526,7 @@ def _to_json_safe(value):
 
 def save_results(
     results,
+    experiment_name,
     config,
     checkpoint_path,
     checkpoint_metadata,
@@ -310,29 +543,44 @@ def save_results(
     clean_results = {
         key: value
         for key, value in results.items()
-        if key not in {
-            "image_names",
-            "names",
-        }
+        if key not in {"image_names", "names"}
     }
 
-    serializable_results = _to_json_safe(
+    serializable_results = to_json_safe(
         clean_results
     )
 
     serializable_results.update({
+        "experiment": experiment_name,
         "model_type": config["model_name"],
         "encoder_type": config["encoder_type"],
         "use_cross_modal_attention": config[
             "use_cross_modal_attention"
         ],
+        "architecture_config": {
+            key: value
+            for key, value in config.items()
+            if key not in {"checkpoint_dir", "output_dir"}
+        },
         "checkpoint_path": str(checkpoint_path),
-        "checkpoint_metadata": _to_json_safe(
+        "checkpoint_metadata": to_json_safe(
             checkpoint_metadata
         ),
-        "split": "validation",
-        "fold": FOLD,
-        "seed": SEED,
+        "evaluation_config": {
+            "fold": FOLD,
+            "seed": SEED,
+            "split": "validation",
+            "batch_size": BATCH_SIZE,
+            "image_size": IMAGE_SIZE,
+            "max_length": MAX_LENGTH,
+            "captions_per_image": EXPECTED_CAPTIONS,
+            "embedding_dim": EMBEDDING_DIM,
+            "query_batch_size": QUERY_BATCH_SIZE,
+            "candidate_chunk_size": CANDIDATE_CHUNK_SIZE,
+            "recall_k": list(RETRIEVAL_KS),
+            "shuffle": False,
+            "drop_remainder": False,
+        },
         "test_set_used": False,
     })
 
@@ -351,9 +599,7 @@ def save_results(
             ensure_ascii=False,
         )
 
-    print(
-        f"\nResults saved to: {output_path}"
-    )
+    print("\nResults saved to:", output_path)
 
     return output_path
 
@@ -363,7 +609,9 @@ def run_evaluation(
     checkpoint_kind="best",
 ):
     if experiment_name not in EXPERIMENTS:
-        available = ", ".join(EXPERIMENTS.keys())
+        available = ", ".join(
+            sorted(EXPERIMENTS.keys())
+        )
 
         raise ValueError(
             f"Unknown experiment '{experiment_name}'. "
@@ -372,81 +620,68 @@ def run_evaluation(
 
     config = EXPERIMENTS[experiment_name]
 
-    print("=" * 65)
+    print("\n" + "=" * 65)
     print(
         f"VISIONMATCH AI - {config['model_name']} EVALUATION"
     )
     print("=" * 65)
 
+    set_reproducibility()
+
+    print("\nChecking shared configuration...")
+    validate_shared_configuration()
+
+    print("\nChecking architecture configuration...")
+    validate_architecture_config(config)
+
     print("\nLoading vocabulary...")
-    vocabulary = load_vocabulary()
-
-    print(
-        "Vocabulary size:",
-        len(vocabulary),
-    )
-
-    print("\nLoading validation dataset...")
-
-    validation_data = Flickr30kDataset(
-        fold_number=FOLD,
-        split="validation",
-    )
-
-    validation_dataset = validation_data.as_dataset(
-        batch_size=32,
-        shuffle=False,
-        prefetch=True,
-    )
-
-    print(
-        "Validation images:",
-        len(validation_data),
-    )
-
-    print("\nBuilding TensorFlow model...")
-
-    model = build_model(
-        vocab_size=len(vocabulary),
-        config=config,
-    )
+    vocabulary = load_project_vocabulary()
 
     print("\nResolving checkpoint...")
-
     checkpoint_path = resolve_checkpoint(
         config["checkpoint_dir"],
         checkpoint_kind=checkpoint_kind,
     )
 
-    print(
-        "Checkpoint:",
-        checkpoint_path,
+    print("Checkpoint:", checkpoint_path)
+
+    print("\nLoading checkpoint metadata...")
+    checkpoint_metadata = load_checkpoint_metadata(
+        checkpoint_path
     )
 
-    print("\nRestoring model weights...")
+    print("\nValidating training/evaluation parity...")
+    validate_training_config(
+        metadata=checkpoint_metadata,
+        experiment_name=experiment_name,
+    )
 
+    print("\nLoading validation dataset...")
+    validation_data, validation_dataset = (
+        build_validation_dataset()
+    )
+
+    print("\nBuilding TensorFlow model...")
+    model = build_model(
+        vocab_size=len(vocabulary),
+        config=config,
+    )
+
+    print("\nRestoring trained weights...")
     model = restore_model(
         model,
         checkpoint_path,
     )
 
-    checkpoint_metadata = load_checkpoint_metadata(
-        checkpoint_path
-    )
-
     print("\nInitializing Retrieval Evaluator...")
-
     evaluator = RetrievalEvaluator(
         model=model,
-        query_batch_size=32,
-        candidate_chunk_size=8192,
-        ks=(1, 5, 10),
+        query_batch_size=QUERY_BATCH_SIZE,
+        candidate_chunk_size=CANDIDATE_CHUNK_SIZE,
+        ks=RETRIEVAL_KS,
     )
 
-    print(
-        "\nEvaluating on validation split..."
-    )
-
+    print("\nEvaluating on validation split...")
     results = evaluator.evaluate(
         validation_dataset
     )
@@ -473,20 +708,24 @@ def run_evaluation(
 
     save_results(
         results=results,
+        experiment_name=experiment_name,
         config=config,
         checkpoint_path=checkpoint_path,
         checkpoint_metadata=checkpoint_metadata,
     )
 
-    print("\nValidation evaluation completed.")
-    print("Test split was NOT used.")
+    print("\n" + "=" * 65)
+    print("EVALUATION COMPLETED")
+    print("=" * 65)
+    print("Training/Evaluation parity: PASS")
+    print("Architecture configuration: PASS")
+    print("Validation split only: PASS")
+    print("Test split used: NO")
 
     return results
 
 
 if __name__ == "__main__":
-    import argparse
-
     parser = argparse.ArgumentParser(
         description=(
             "Evaluate a VisionMatch image-text retrieval experiment."

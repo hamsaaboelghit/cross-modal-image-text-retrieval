@@ -150,7 +150,10 @@ class RetrievalEngine:
         )
 
         if query_embedding.shape.rank == 1:
-            query_embedding = tf.expand_dims(query_embedding, axis=0)
+            query_embedding = tf.expand_dims(
+                query_embedding,
+                axis=0,
+            )
 
         if query_embedding.shape.rank != 2:
             raise ValueError(
@@ -178,7 +181,10 @@ class RetrievalEngine:
         )
 
         if query_embedding.shape.rank == 1:
-            query_embedding = tf.expand_dims(query_embedding, axis=0)
+            query_embedding = tf.expand_dims(
+                query_embedding,
+                axis=0,
+            )
 
         if query_embedding.shape.rank != 2:
             raise ValueError(
