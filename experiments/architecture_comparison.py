@@ -1,11 +1,12 @@
+
 import csv
 import json
+from copy import deepcopy
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-# Shared experiment protocol
 SHARED = {
     "dataset": "Flickr30k",
     "fold": 1,
@@ -14,7 +15,7 @@ SHARED = {
     "test_used_for_selection": False,
     "image_size": "224x224",
     "image_color": "RGB",
-    "image_resize": "BILINEAR",
+    "image_resize": "Dataset resize to 224x224; interpolation not independently verified here",
     "captions_per_image": 5,
     "max_caption_length": 34,
     "padding_token_id": 0,
@@ -43,11 +44,12 @@ EXPERIMENTS = [
         "category": "Baseline",
         "image_encoder": "Custom CNN",
         "text_encoder": "Embedding + Masked Mean Pooling",
-        "image_normalization": "RGB float32 / 255.0",
+        "image_preprocessing": "RGB float32 / 255.0",
         "text_hidden_dim": "Not applicable",
         "dropout": 0.1,
         "pretrained_image_weights": False,
         "cross_modal_attention": False,
+        "retrieval_loss": "Multi-Positive InfoNCE",
         "auxiliary_loss": "None",
         "checkpoint": "checkpoints/experiments/baseline_fold1_seed42",
     },
@@ -57,11 +59,12 @@ EXPERIMENTS = [
         "category": "Classic DL",
         "image_encoder": "ResNet50",
         "text_encoder": "LSTM + Attention",
-        "image_normalization": "ResNet50 preprocess_input",
+        "image_preprocessing": "ResNet50 preprocess_input",
         "text_hidden_dim": 512,
         "dropout": 0.2,
         "pretrained_image_weights": True,
         "cross_modal_attention": False,
+        "retrieval_loss": "Multi-Positive InfoNCE",
         "auxiliary_loss": "None",
         "checkpoint": "checkpoints/experiments/lstm_fold1_seed42",
     },
@@ -71,11 +74,12 @@ EXPERIMENTS = [
         "category": "Classic DL",
         "image_encoder": "ResNet50",
         "text_encoder": "GRU + Attention",
-        "image_normalization": "ResNet50 preprocess_input",
+        "image_preprocessing": "ResNet50 preprocess_input",
         "text_hidden_dim": 512,
         "dropout": 0.2,
         "pretrained_image_weights": True,
         "cross_modal_attention": False,
+        "retrieval_loss": "Multi-Positive InfoNCE",
         "auxiliary_loss": "None",
         "checkpoint": "checkpoints/experiments/gru_fold1_seed42",
     },
@@ -85,11 +89,12 @@ EXPERIMENTS = [
         "category": "Modern DL",
         "image_encoder": "ResNet50",
         "text_encoder": "Transformer + Attention Pooling",
-        "image_normalization": "ResNet50 preprocess_input",
+        "image_preprocessing": "ResNet50 preprocess_input",
         "text_hidden_dim": 512,
         "dropout": 0.2,
         "pretrained_image_weights": True,
         "cross_modal_attention": False,
+        "retrieval_loss": "Multi-Positive InfoNCE",
         "auxiliary_loss": "None",
         "checkpoint": "checkpoints/experiments/transformer_fold1_seed42",
     },
@@ -99,11 +104,12 @@ EXPERIMENTS = [
         "category": "Advanced Architecture",
         "image_encoder": "ResNet50 with spatial features",
         "text_encoder": "LSTM + Attention",
-        "image_normalization": "ResNet50 preprocess_input",
+        "image_preprocessing": "ResNet50 preprocess_input",
         "text_hidden_dim": 512,
         "dropout": 0.2,
         "pretrained_image_weights": True,
         "cross_modal_attention": True,
+        "retrieval_loss": "Multi-Positive InfoNCE",
         "auxiliary_loss": "Matching Binary Cross-Entropy, weight=0.2",
         "checkpoint": "checkpoints/experiments/cross_attention_fold1_seed42",
     },
@@ -117,14 +123,11 @@ def checkpoint_status(relative_path):
         return "MISSING"
 
     if path.is_file():
-        return "PRESENT"
+        return "PRESENT - existence only"
 
-    files = [
-        item for item in path.rglob("*")
-        if item.is_file()
-    ]
+    files = [item for item in path.rglob("*") if item.is_file()]
 
-    return "PRESENT" if files else "EMPTY"
+    return "PRESENT - existence only" if files else "EMPTY"
 
 
 def validate_experiment_protocol():
@@ -145,19 +148,40 @@ def validate_experiment_protocol():
     names = [item["experiment"] for item in EXPERIMENTS]
     assert len(names) == len(set(names)), "Duplicate experiment names."
 
-    for item in EXPERIMENTS:
-        item.update(SHARED)
-        item["checkpoint_status"] = checkpoint_status(
-            item["checkpoint"]
+    print("[PASS] Shared experiment protocol validated.")
+    print("[PASS] Validation is used for model selection.")
+    print("[PASS] Test split is excluded from model selection.")
+    print("[NOTE] Image normalization differs by encoder architecture.")
+    print("[NOTE] Cross-modal model has an additional matching loss.")
+
+
+def build_comparison_rows():
+    rows = []
+
+    for experiment in EXPERIMENTS:
+        row = deepcopy(SHARED)
+        row.update(experiment)
+
+        row["checkpoint_status"] = checkpoint_status(
+            experiment["checkpoint"]
         )
 
-    print("[PASS] Shared experiment protocol validated.")
-    print("[PASS] All models use the same fold and split policy.")
-    print("[PASS] Test split is excluded from model selection.")
-    print("[PASS] Common training settings are recorded.")
+        row["training_completion"] = (
+            "Must be verified from training logs and checkpoint metadata"
+        )
+
+        row["configuration_verified"] = (
+            "Not verified by checkpoint existence"
+        )
+
+        rows.append(row)
+
+    return rows
 
 
 def save_comparison():
+    rows = build_comparison_rows()
+
     output_dir = (
         PROJECT_ROOT
         / "results"
@@ -170,44 +194,35 @@ def save_comparison():
     csv_path = output_dir / "architecture_comparison.csv"
 
     with json_path.open("w", encoding="utf-8") as file:
-        json.dump(
-            EXPERIMENTS,
-            file,
-            indent=4,
-            ensure_ascii=False,
-        )
+        json.dump(rows, file, indent=4, ensure_ascii=False)
 
-    columns = list(EXPERIMENTS[0].keys())
+    columns = list(rows[0].keys())
 
     with csv_path.open(
         "w",
         newline="",
         encoding="utf-8-sig",
     ) as file:
-        writer = csv.DictWriter(
-            file,
-            fieldnames=columns,
-        )
+        writer = csv.DictWriter(file, fieldnames=columns)
         writer.writeheader()
-        writer.writerows(EXPERIMENTS)
+        writer.writerows(rows)
 
-    print("\nArchitecture comparison saved:")
+    print("\nComparison files saved:")
     print(json_path)
     print(csv_path)
 
-    print("\nMODEL CHECKPOINT STATUS")
+    print("\nCHECKPOINT STATUS")
     print("-" * 75)
 
-    for item in EXPERIMENTS:
+    for row in rows:
         print(
-            f"{item['model']:<43} "
-            f"{item['checkpoint_status']}"
+            f"{row['model']:<43} "
+            f"{row['checkpoint_status']}"
         )
 
     print("-" * 75)
-    print("Note: PRESENT only means checkpoint files exist.")
-    print("It does not prove that the checkpoint passed")
-    print("the full configuration-parity validation.")
+    print("Reminder: checkpoint presence does not verify training settings.")
+    print("Actual epochs and configuration must be checked from logs/metadata.")
 
 
 def main():
