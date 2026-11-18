@@ -17,26 +17,50 @@ class CheckpointManager:
     )
 
     def __init__(self, checkpoint_dir="checkpoints"):
+
         self.checkpoint_dir = Path(checkpoint_dir)
+
         self.latest_dir = self.checkpoint_dir / "latest"
         self.best_dir = self.checkpoint_dir / "best"
 
-        self.latest_dir.mkdir(parents=True, exist_ok=True)
-        self.best_dir.mkdir(parents=True, exist_ok=True)
+        self.latest_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        self.best_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
         self.best_val_loss = float("inf")
 
         self.epoch = tf.Variable(
-            0, dtype=tf.int64, trainable=False
+            0,
+            dtype=tf.int64,
+            trainable=False,
+            name="epoch",
         )
+
         self.global_step = tf.Variable(
-            0, dtype=tf.int64, trainable=False
+            0,
+            dtype=tf.int64,
+            trainable=False,
+            name="global_step",
         )
+
         self.val_loss = tf.Variable(
-            float("inf"), dtype=tf.float32, trainable=False
+            float("inf"),
+            dtype=tf.float32,
+            trainable=False,
+            name="val_loss",
         )
+
         self.best_loss = tf.Variable(
-            float("inf"), dtype=tf.float32, trainable=False
+            float("inf"),
+            dtype=tf.float32,
+            trainable=False,
+            name="best_loss",
         )
 
         self.checkpoint = None
@@ -45,14 +69,23 @@ class CheckpointManager:
 
     @staticmethod
     def _validate_finite_number(value, name):
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise TypeError(f"{name} must be numeric.")
+
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
+            raise TypeError(
+                f"{name} must be numeric."
+            )
 
         if not math.isfinite(float(value)):
-            raise ValueError(f"{name} must be finite.")
+            raise ValueError(
+                f"{name} must be finite."
+            )
 
     @staticmethod
     def _validate_early_stopping_state(state):
+
         if state is None:
             return
 
@@ -61,7 +94,12 @@ class CheckpointManager:
                 "early_stopping_state must be a dictionary or None."
             )
 
-        required = {"best_loss", "counter", "early_stop"}
+        required = {
+            "best_loss",
+            "counter",
+            "early_stop",
+        }
+
         missing = required - state.keys()
 
         if missing:
@@ -69,23 +107,29 @@ class CheckpointManager:
                 f"Missing early stopping keys: {missing}"
             )
 
+        counter = state["counter"]
+
         if (
-            not isinstance(state["counter"], int)
-            or isinstance(state["counter"], bool)
-            or state["counter"] < 0
+            not isinstance(counter, int)
+            or isinstance(counter, bool)
+            or counter < 0
         ):
             raise ValueError(
                 "Early stopping counter must be non-negative."
             )
 
         if not isinstance(state["early_stop"], bool):
-            raise TypeError("early_stop must be boolean.")
+            raise TypeError(
+                "early_stop must be boolean."
+            )
 
         best_loss = state["best_loss"]
 
         if (
-            not isinstance(best_loss, (int, float))
+            isinstance(best_loss, bool)
+            or not isinstance(best_loss, (int, float))
             or math.isnan(float(best_loss))
+            or float(best_loss) == float("-inf")
         ):
             raise ValueError(
                 "Invalid early stopping best_loss."
@@ -93,32 +137,52 @@ class CheckpointManager:
 
     @classmethod
     def _get_scheduler_state(cls, scheduler):
+
         if scheduler is None:
             return None
 
         state = {}
 
         for field in cls.SCHEDULER_STATE_FIELDS:
+
             if not hasattr(scheduler, field):
                 continue
 
             value = getattr(scheduler, field)
 
-            if isinstance(value, (int, float, bool, str)):
+            if isinstance(
+                value,
+                (int, float, bool, str),
+            ):
                 state[field] = value
 
         return state
 
     @classmethod
     def _restore_scheduler_state(cls, scheduler, state):
+
         if scheduler is None or not state:
             return
 
+        if not isinstance(state, dict):
+            raise TypeError(
+                "scheduler_state must be a dictionary."
+            )
+
         for field in cls.SCHEDULER_STATE_FIELDS:
-            if field in state and hasattr(scheduler, field):
-                setattr(scheduler, field, state[field])
+
+            if (
+                field in state
+                and hasattr(scheduler, field)
+            ):
+                setattr(
+                    scheduler,
+                    field,
+                    state[field],
+                )
 
     def _build_managers(self, model, optimizer=None):
+
         objects = {
             "model": model,
             "epoch": self.epoch,
@@ -130,7 +194,9 @@ class CheckpointManager:
         if optimizer is not None:
             objects["optimizer"] = optimizer
 
-        self.checkpoint = tf.train.Checkpoint(**objects)
+        self.checkpoint = tf.train.Checkpoint(
+            **objects
+        )
 
         self.latest_manager = tf.train.CheckpointManager(
             self.checkpoint,
@@ -147,30 +213,47 @@ class CheckpointManager:
         )
 
     def update_best(self, val_loss):
-        self._validate_finite_number(val_loss, "val_loss")
+
+        self._validate_finite_number(
+            val_loss,
+            "val_loss",
+        )
 
         if float(val_loss) < self.best_val_loss:
+
             self.best_val_loss = float(val_loss)
             self.best_loss.assign(self.best_val_loss)
+
             return True
 
         return False
 
     @staticmethod
     def _write_metadata(checkpoint_path, metadata):
-        metadata_path = checkpoint_path + ".json"
+
+        metadata_path = Path(
+            checkpoint_path + ".json"
+        )
+
+        temporary_path = Path(
+            str(metadata_path) + ".tmp"
+        )
 
         with open(
-            metadata_path,
+            temporary_path,
             "w",
             encoding="utf-8",
         ) as file:
+
             json.dump(
                 metadata,
                 file,
                 indent=4,
+                allow_nan=False,
                 default=str,
             )
+
+        temporary_path.replace(metadata_path)
 
     def save_checkpoint(
         self,
@@ -185,6 +268,12 @@ class CheckpointManager:
         early_stopping_state=None,
         save_best_only=True,
     ):
+
+        if model is None:
+            raise ValueError(
+                "model cannot be None."
+            )
+
         if (
             not isinstance(epoch, int)
             or isinstance(epoch, bool)
@@ -203,21 +292,43 @@ class CheckpointManager:
                 "global_step must be a non-negative integer."
             )
 
-        self._validate_finite_number(val_loss, "val_loss")
+        if not isinstance(is_best, bool):
+            raise TypeError(
+                "is_best must be boolean."
+            )
+
+        if not isinstance(save_best_only, bool):
+            raise TypeError(
+                "save_best_only must be boolean."
+            )
+
+        self._validate_finite_number(
+            val_loss,
+            "val_loss",
+        )
+
         self._validate_early_stopping_state(
             early_stopping_state
         )
 
         if self.checkpoint is None:
-            self._build_managers(model, optimizer)
+
+            self._build_managers(
+                model,
+                optimizer,
+            )
 
         self.epoch.assign(epoch)
         self.global_step.assign(global_step)
         self.val_loss.assign(float(val_loss))
 
         if is_best:
+
             self.best_val_loss = float(val_loss)
-            self.best_loss.assign(self.best_val_loss)
+
+            self.best_loss.assign(
+                self.best_val_loss
+            )
 
         config_data = (
             config.to_dict()
@@ -241,23 +352,47 @@ class CheckpointManager:
             checkpoint_number=epoch + 1
         )
 
-        self._write_metadata(latest_path, metadata)
+        if latest_path is None:
+            raise RuntimeError(
+                "Failed to save latest checkpoint."
+            )
 
-        print(f"Latest checkpoint saved: {latest_path}")
+        self._write_metadata(
+            latest_path,
+            metadata,
+        )
+
+        print(
+            f"Latest checkpoint saved: {latest_path}"
+        )
 
         if is_best:
+
             best_path = self.best_manager.save(
                 checkpoint_number=epoch + 1
             )
 
-            self._write_metadata(best_path, metadata)
+            if best_path is None:
+                raise RuntimeError(
+                    "Failed to save best checkpoint."
+                )
 
-            print(f"Best checkpoint saved: {best_path}")
+            self._write_metadata(
+                best_path,
+                metadata,
+            )
+
+            print(
+                f"Best checkpoint saved: {best_path}"
+            )
 
         if not save_best_only:
+
             epoch_dir = (
-                self.checkpoint_dir / f"epoch_{epoch + 1}"
+                self.checkpoint_dir
+                / f"epoch_{epoch + 1}"
             )
+
             epoch_dir.mkdir(
                 parents=True,
                 exist_ok=True,
@@ -280,13 +415,20 @@ class CheckpointManager:
 
     @staticmethod
     def _resolve_checkpoint_path(checkpoint_path):
+
+        if checkpoint_path is None:
+            raise ValueError(
+                "checkpoint_path cannot be None."
+            )
+
         path = Path(checkpoint_path)
 
         if path.is_dir():
-            # If the experiment root is supplied, resume from latest/.
+
             latest_dir = path / "latest"
 
             if latest_dir.is_dir():
+
                 latest = tf.train.latest_checkpoint(
                     str(latest_dir)
                 )
@@ -294,8 +436,9 @@ class CheckpointManager:
                 if latest is not None:
                     return latest
 
-            # If latest/ was supplied directly, use it.
-            latest = tf.train.latest_checkpoint(str(path))
+            latest = tf.train.latest_checkpoint(
+                str(path)
+            )
 
             if latest is not None:
                 return latest
@@ -306,52 +449,38 @@ class CheckpointManager:
 
         checkpoint_prefix = str(path)
 
-        if not Path(checkpoint_prefix + ".index").is_file():
+        if not Path(
+            checkpoint_prefix + ".index"
+        ).is_file():
+
             raise FileNotFoundError(
                 f"Checkpoint not found: {checkpoint_prefix}"
             )
 
         return checkpoint_prefix
 
-    def load_checkpoint(
-        self,
-        checkpoint_path,
-        model,
-        optimizer=None,
-        scheduler=None,
-        map_location=None,
-    ):
-        checkpoint_prefix = self._resolve_checkpoint_path(
-            checkpoint_path
+    @staticmethod
+    def _load_metadata(checkpoint_prefix):
+
+        metadata_path = Path(
+            checkpoint_prefix + ".json"
         )
 
-        if self.checkpoint is None:
-            self._build_managers(model, optimizer)
+        if not metadata_path.is_file():
+            return None
 
-        status = self.checkpoint.restore(checkpoint_prefix)
+        with open(
+            metadata_path,
+            "r",
+            encoding="utf-8",
+        ) as file:
 
-        # Optimizer slots may be restored lazily by TensorFlow.
-        status.expect_partial()
+            metadata = json.load(file)
 
-        metadata_path = checkpoint_prefix + ".json"
-
-        if Path(metadata_path).is_file():
-            with open(
-                metadata_path,
-                "r",
-                encoding="utf-8",
-            ) as file:
-                metadata = json.load(file)
-        else:
-            metadata = {
-                "epoch": int(self.epoch.numpy()),
-                "val_loss": float(self.val_loss.numpy()),
-                "best_val_loss": float(self.best_loss.numpy()),
-                "global_step": int(self.global_step.numpy()),
-                "config": None,
-                "early_stopping_state": None,
-                "scheduler_state": None,
-            }
+        if not isinstance(metadata, dict):
+            raise ValueError(
+                "Checkpoint metadata must be a dictionary."
+            )
 
         required = {
             "epoch",
@@ -367,6 +496,93 @@ class CheckpointManager:
                 f"Checkpoint metadata is missing: {missing}"
             )
 
+        for field in (
+            "epoch",
+            "global_step",
+        ):
+
+            value = metadata[field]
+
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 0
+            ):
+                raise ValueError(
+                    f"Invalid checkpoint metadata field: {field}"
+                )
+
+        for field in (
+            "val_loss",
+            "best_val_loss",
+        ):
+
+            value = metadata[field]
+
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+            ):
+                raise ValueError(
+                    f"Invalid checkpoint metadata field: {field}"
+                )
+
+        return metadata
+
+    def load_checkpoint(
+        self,
+        checkpoint_path,
+        model,
+        optimizer=None,
+        scheduler=None,
+        map_location=None,
+    ):
+
+        if model is None:
+            raise ValueError(
+                "model cannot be None."
+            )
+
+        checkpoint_prefix = (
+            self._resolve_checkpoint_path(
+                checkpoint_path
+            )
+        )
+
+        if self.checkpoint is None:
+
+            self._build_managers(
+                model,
+                optimizer,
+            )
+
+        status = self.checkpoint.restore(
+            checkpoint_prefix
+        )
+
+        # Verify that current model and checkpoint objects match.
+        status.assert_existing_objects_matched()
+
+        # Allow extra checkpoint objects and deferred optimizer slots.
+        status.expect_partial()
+
+        metadata = self._load_metadata(
+            checkpoint_prefix
+        )
+
+        if metadata is None:
+
+            metadata = {
+                "epoch": int(self.epoch.numpy()),
+                "val_loss": float(self.val_loss.numpy()),
+                "best_val_loss": float(self.best_loss.numpy()),
+                "global_step": int(self.global_step.numpy()),
+                "config": None,
+                "early_stopping_state": None,
+                "scheduler_state": None,
+            }
+
         self.best_val_loss = float(
             metadata["best_val_loss"]
         )
@@ -379,17 +595,22 @@ class CheckpointManager:
         print(
             f"Checkpoint restored: {checkpoint_prefix}"
         )
+
         print(
-            f"Resuming from epoch: {int(metadata['epoch']) + 1}"
+            f"Resuming from epoch: "
+            f"{int(metadata['epoch']) + 1}"
         )
+
         print(
-            f"Restored global step: {metadata['global_step']}"
+            f"Restored global step: "
+            f"{metadata['global_step']}"
         )
 
         return metadata
 
 
 if __name__ == "__main__":
+
     print(
         "TensorFlow CheckpointManager module imported successfully."
     )

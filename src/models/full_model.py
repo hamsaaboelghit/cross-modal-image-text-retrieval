@@ -1,3 +1,4 @@
+
 import tensorflow as tf
 
 try:
@@ -14,22 +15,23 @@ except ImportError:
 
 class CrossModalRetrievalModel(tf.keras.Model):
     """
-    Complete image-text retrieval model.
+    Image-text retrieval model with an optional cross-modal
+    matching branch.
 
     Image input:
-        [B, H, W, 3] RGB images in [0, 255].
+        [B, H, W, 3], RGB in [0, 255].
 
     Caption input:
-        [B, C, L] integer token IDs.
+        [B, C, L], integer token IDs.
 
-    Main outputs:
+    Outputs:
         image_embeddings: [B, 512]
         text_embeddings: [B, C, 512]
 
-    Optional outputs:
+    Optional matching outputs:
         matching_scores: [B, C]
-        attention_weights
-        cross_modal_attention_weights
+        negative_matching_scores: [B, C]
+        matching_negatives_valid: scalar bool
     """
 
     def __init__(
@@ -79,7 +81,9 @@ class CrossModalRetrievalModel(tf.keras.Model):
         )
 
         self.embedding_dim = 512
-        self.use_cross_modal_attention = use_cross_modal_attention
+        self.use_cross_modal_attention = bool(
+            use_cross_modal_attention
+        )
 
         if self.use_cross_modal_attention:
             self.cross_modal_attention = CrossModalAttention(
@@ -101,7 +105,9 @@ class CrossModalRetrievalModel(tf.keras.Model):
                         "gelu",
                         name="matching_gelu",
                     ),
-                    tf.keras.layers.Dropout(cross_modal_dropout),
+                    tf.keras.layers.Dropout(
+                        cross_modal_dropout
+                    ),
                     tf.keras.layers.Dense(
                         1,
                         name="matching_output",
@@ -114,85 +120,109 @@ class CrossModalRetrievalModel(tf.keras.Model):
             self.matching_head = None
 
     def encode_image(self, images, training=None):
-        """
-        Encode images independently for image-to-text retrieval.
-
-        Args:
-            images: [B, H, W, 3], RGB values in [0, 255].
-
-        Returns:
-            Normalized image embeddings [B, 512].
-        """
         images = tf.convert_to_tensor(images)
 
-        tf.debugging.assert_rank(
-            images,
-            4,
-            message="Images must have shape [B, H, W, 3].",
-        )
-
+        tf.debugging.assert_rank(images, 4)
         tf.debugging.assert_equal(
             tf.shape(images)[-1],
             3,
-            message="Images must have exactly 3 RGB channels.",
+            message="Images must have 3 RGB channels.",
         )
-
-        tf.debugging.assert_positive(
-            tf.shape(images)[0],
-            message="Image batch cannot be empty.",
-        )
+        tf.debugging.assert_positive(tf.shape(images)[0])
 
         image_features = self.image_encoder(
             images,
             training=training,
         )
 
-        image_embeddings = self.projection.image_projection(
+        return self.projection.image_projection(
             image_features,
             training=training,
         )
 
-        return image_embeddings
-
     def encode_text(self, captions, training=None):
-        """
-        Encode captions independently for text-to-image retrieval.
-
-        Args:
-            captions: [B, L] integer token IDs.
-
-        Returns:
-            Normalized text embeddings [B, 512].
-        """
         captions = tf.convert_to_tensor(captions)
 
-        tf.debugging.assert_rank(
-            captions,
-            2,
-            message="Captions must have shape [B, L].",
-        )
-
-        tf.debugging.assert_positive(
-            tf.shape(captions)[0],
-            message="Caption batch cannot be empty.",
-        )
-
-        tf.debugging.assert_positive(
-            tf.shape(captions)[1],
-            message="Caption sequence length must be greater than zero.",
-        )
+        tf.debugging.assert_rank(captions, 2)
+        tf.debugging.assert_positive(tf.shape(captions)[0])
+        tf.debugging.assert_positive(tf.shape(captions)[1])
 
         text_features = self.text_encoder(
             captions,
             training=training,
         )
 
-        text_embeddings = self.projection.text_projection(
+        return self.projection.text_projection(
             text_features,
             training=training,
         )
 
-        return text_embeddings
+    def _score_pairs(
+        self,
+        text_sequence_features,
+        text_mask,
+        image_regions,
+        image_embeddings,
+        training=None,
+    ):
+        """
+        Score aligned image-caption pairs.
+
+        All inputs have the same first dimension N:
+            text_sequence_features: [N, L, text_dim]
+            text_mask: [N, L]
+            image_regions: [N, R, image_dim]
+            image_embeddings: [N, 512]
+        """
+
+        fused_features, attention_weights = (
+            self.cross_modal_attention(
+                text_features=text_sequence_features,
+                image_regions=image_regions,
+                text_mask=text_mask,
+                training=training,
+            )
+        )
+
+        valid_mask = tf.cast(
+            text_mask[:, :, tf.newaxis],
+            fused_features.dtype,
+        )
+
+        summed_features = tf.reduce_sum(
+            fused_features * valid_mask,
+            axis=1,
+        )
+
+        valid_counts = tf.reduce_sum(
+            valid_mask,
+            axis=1,
+        )
+
+        pooled_features = summed_features / tf.maximum(
+            valid_counts,
+            tf.cast(1.0, fused_features.dtype),
+        )
+
+        matching_input = tf.concat(
+            [
+                image_embeddings,
+                pooled_features,
+            ],
+            axis=-1,
+        )
+
+        matching_logits = self.matching_head(
+            matching_input,
+            training=training,
+        )
+
+        matching_logits = tf.squeeze(
+            matching_logits,
+            axis=-1,
+        )
+
+        return matching_logits, attention_weights
 
     def call(
         self,
@@ -207,19 +237,19 @@ class CrossModalRetrievalModel(tf.keras.Model):
         tf.debugging.assert_rank(
             images,
             4,
-            message="Images must have shape [B, H, W, 3].",
+            message="Images must have shape [B,H,W,3].",
         )
 
         tf.debugging.assert_equal(
             tf.shape(images)[-1],
             3,
-            message="Images must have exactly 3 RGB channels.",
+            message="Images must have 3 RGB channels.",
         )
 
         tf.debugging.assert_rank(
             captions,
             3,
-            message="Captions must have shape [B, C, L].",
+            message="Captions must have shape [B,C,L].",
         )
 
         batch_size = tf.shape(images)[0]
@@ -230,25 +260,16 @@ class CrossModalRetrievalModel(tf.keras.Model):
         tf.debugging.assert_equal(
             batch_size,
             caption_batch_size,
-            message="Images and captions must have the same batch size.",
+            message="Image and caption batch sizes must match.",
         )
 
-        tf.debugging.assert_positive(
-            batch_size,
-            message="Image batch cannot be empty.",
-        )
+        tf.debugging.assert_positive(batch_size)
+        tf.debugging.assert_positive(num_captions)
+        tf.debugging.assert_positive(sequence_length)
 
-        tf.debugging.assert_positive(
-            num_captions,
-            message="At least one caption per image is required.",
-        )
-
-        tf.debugging.assert_positive(
-            sequence_length,
-            message="Caption sequence length must be greater than zero.",
-        )
-
-        # 1. Image encoding.
+        # --------------------------------------------------
+        # 1. Image encoding
+        # --------------------------------------------------
         if self.use_cross_modal_attention:
             image_features, image_regions = self.image_encoder(
                 images,
@@ -262,13 +283,20 @@ class CrossModalRetrievalModel(tf.keras.Model):
             )
             image_regions = None
 
-        # 2. Flatten captions from [B, C, L] to [B*C, L].
+        # --------------------------------------------------
+        # 2. Flatten captions: [B,C,L] -> [B*C,L]
+        # --------------------------------------------------
         flat_captions = tf.reshape(
             captions,
-            (batch_size * num_captions, sequence_length),
+            (
+                batch_size * num_captions,
+                sequence_length,
+            ),
         )
 
-        # 3. Text encoding.
+        # --------------------------------------------------
+        # 3. Text encoding
+        # --------------------------------------------------
         if self.use_cross_modal_attention:
             if return_attention:
                 (
@@ -293,10 +321,12 @@ class CrossModalRetrievalModel(tf.keras.Model):
                 attention_weights = None
         else:
             if return_attention:
-                text_features, attention_weights = self.text_encoder(
-                    flat_captions,
-                    training=training,
-                    return_attention=True,
+                text_features, attention_weights = (
+                    self.text_encoder(
+                        flat_captions,
+                        training=training,
+                        return_attention=True,
+                    )
                 )
             else:
                 text_features = self.text_encoder(
@@ -307,7 +337,9 @@ class CrossModalRetrievalModel(tf.keras.Model):
 
             text_sequence_features = None
 
-        # 4. Independent image and text embeddings.
+        # --------------------------------------------------
+        # 4. Independent retrieval embeddings
+        # --------------------------------------------------
         image_embeddings, flat_text_embeddings = self.projection(
             image_features,
             text_features,
@@ -316,7 +348,11 @@ class CrossModalRetrievalModel(tf.keras.Model):
 
         text_embeddings = tf.reshape(
             flat_text_embeddings,
-            (batch_size, num_captions, self.embedding_dim),
+            (
+                batch_size,
+                num_captions,
+                self.embedding_dim,
+            ),
         )
 
         output = {
@@ -324,8 +360,15 @@ class CrossModalRetrievalModel(tf.keras.Model):
             "text_embeddings": text_embeddings,
         }
 
-        # 5. Optional cross-modal matching branch.
+        # --------------------------------------------------
+        # 5. Cross-modal matching branch
+        # --------------------------------------------------
         if self.use_cross_modal_attention:
+            text_mask = tf.not_equal(
+                flat_captions,
+                0,
+            )
+
             paired_image_regions = tf.repeat(
                 image_regions,
                 repeats=num_captions,
@@ -338,77 +381,90 @@ class CrossModalRetrievalModel(tf.keras.Model):
                 axis=0,
             )
 
-            text_mask = tf.not_equal(flat_captions, 0)
-
-            fused_features, cross_attention_weights = (
-                self.cross_modal_attention(
-                    text_features=text_sequence_features,
-                    image_regions=paired_image_regions,
+            positive_scores, cross_attention_weights = (
+                self._score_pairs(
+                    text_sequence_features=text_sequence_features,
                     text_mask=text_mask,
+                    image_regions=paired_image_regions,
+                    image_embeddings=paired_image_embeddings,
                     training=training,
                 )
             )
 
-            valid_mask = tf.cast(
-                text_mask[:, :, tf.newaxis],
-                fused_features.dtype,
+            # Negative pairs:
+            # Pair each caption with another image in the batch.
+            # A one-item batch is marked invalid by the loss.
+            negative_image_regions = tf.roll(
+                image_regions,
+                shift=1,
+                axis=0,
             )
 
-            summed_features = tf.reduce_sum(
-                fused_features * valid_mask,
-                axis=1,
+            negative_image_embeddings = tf.roll(
+                image_embeddings,
+                shift=1,
+                axis=0,
             )
 
-            valid_counts = tf.reduce_sum(
-                valid_mask,
-                axis=1,
+            paired_negative_regions = tf.repeat(
+                negative_image_regions,
+                repeats=num_captions,
+                axis=0,
             )
 
-            fused_pooled = summed_features / tf.maximum(
-                valid_counts,
-                tf.cast(1.0, fused_features.dtype),
+            paired_negative_embeddings = tf.repeat(
+                negative_image_embeddings,
+                repeats=num_captions,
+                axis=0,
             )
 
-            matching_input = tf.concat(
-                [
-                    paired_image_embeddings,
-                    fused_pooled,
-                ],
-                axis=-1,
-            )
-
-            matching_scores = self.matching_head(
-                matching_input,
+            negative_scores, _ = self._score_pairs(
+                text_sequence_features=text_sequence_features,
+                text_mask=text_mask,
+                image_regions=paired_negative_regions,
+                image_embeddings=paired_negative_embeddings,
                 training=training,
             )
 
-            matching_scores = tf.squeeze(
-                matching_scores,
-                axis=-1,
-            )
-
             output["matching_scores"] = tf.reshape(
-                matching_scores,
+                positive_scores,
                 (batch_size, num_captions),
             )
 
+            output["negative_matching_scores"] = tf.reshape(
+                negative_scores,
+                (batch_size, num_captions),
+            )
+
+            output["matching_negatives_valid"] = (
+                tf.greater(batch_size, 1)
+            )
+
             if return_attention:
-                output["cross_modal_attention_weights"] = tf.reshape(
-                    cross_attention_weights,
-                    (
-                        batch_size,
-                        num_captions,
-                        sequence_length,
-                        tf.shape(image_regions)[1],
-                    ),
+                output["cross_modal_attention_weights"] = (
+                    tf.reshape(
+                        cross_attention_weights,
+                        (
+                            batch_size,
+                            num_captions,
+                            sequence_length,
+                            tf.shape(image_regions)[1],
+                        ),
+                    )
                 )
 
-        # 6. Original text attention output.
+        # --------------------------------------------------
+        # 6. Text attention output
+        # --------------------------------------------------
         if return_attention:
             if attention_weights is not None:
                 output["attention_weights"] = tf.reshape(
                     attention_weights,
-                    (batch_size, num_captions, sequence_length),
+                    (
+                        batch_size,
+                        num_captions,
+                        sequence_length,
+                    ),
                 )
             else:
                 output["attention_weights"] = None
@@ -428,7 +484,6 @@ def _run_full_model_tests():
     sequence_length = 12
     vocab_size = 1000
 
-    # Use the required ResNet50 input size.
     images = tf.random.uniform(
         (batch_size, 224, 224, 3),
         minval=0,
@@ -443,13 +498,11 @@ def _run_full_model_tests():
         dtype=tf.int32,
     )
 
-    # Add padding to the ends of some captions.
     captions_array = captions.numpy()
     captions_array[0, 1, 8:] = 0
     captions_array[1, 2, 5:] = 0
     captions = tf.convert_to_tensor(captions_array)
 
-    # Main retrieval model without optional matching branch.
     model = CrossModalRetrievalModel(
         vocab_size=vocab_size,
         encoder_type="gru",
@@ -480,24 +533,14 @@ def _run_full_model_tests():
         512,
     )
 
-    image_norms = tf.norm(
-        outputs["image_embeddings"],
-        axis=-1,
-    )
-
-    text_norms = tf.norm(
-        outputs["text_embeddings"],
-        axis=-1,
-    )
-
     tf.debugging.assert_near(
-        image_norms,
+        tf.norm(outputs["image_embeddings"], axis=-1),
         tf.ones((batch_size,)),
         atol=1e-5,
     )
 
     tf.debugging.assert_near(
-        text_norms,
+        tf.norm(outputs["text_embeddings"], axis=-1),
         tf.ones((batch_size, num_captions)),
         atol=1e-5,
     )
@@ -508,13 +551,14 @@ def _run_full_model_tests():
         sequence_length,
     )
 
-    print("Image embeddings: PASS")
-    print("Text embeddings: PASS")
+    print("Independent retrieval embeddings: PASS")
     print("Embedding normalization: PASS")
     print("Text attention output: PASS")
 
-    # Independent encoding interfaces.
-    image_only = model.encode_image(images, training=False)
+    image_only = model.encode_image(
+        images,
+        training=False,
+    )
 
     text_only = model.encode_text(
         tf.reshape(captions, (-1, sequence_length)),
@@ -522,16 +566,14 @@ def _run_full_model_tests():
     )
 
     assert tuple(image_only.shape) == (batch_size, 512)
-
     assert tuple(text_only.shape) == (
         batch_size * num_captions,
         512,
     )
 
-    print("encode_image(): PASS")
-    print("encode_text(): PASS")
+    print("Independent image encoding: PASS")
+    print("Independent text encoding: PASS")
 
-    # Optional cross-modal branch.
     advanced_model = CrossModalRetrievalModel(
         vocab_size=vocab_size,
         encoder_type="gru",
@@ -544,16 +586,58 @@ def _run_full_model_tests():
         use_cross_modal_attention=True,
     )
 
-    advanced_outputs = advanced_model(
-        images,
-        captions,
-        training=False,
-        return_attention=True,
+    with tf.GradientTape() as tape:
+        advanced_outputs = advanced_model(
+            images,
+            captions,
+            training=True,
+            return_attention=True,
+        )
+
+        loss_fn = tf.keras.losses.BinaryCrossentropy(
+            from_logits=True
+        )
+
+        positive_loss = loss_fn(
+            tf.ones_like(
+                advanced_outputs["matching_scores"]
+            ),
+            advanced_outputs["matching_scores"],
+        )
+
+        negative_loss = loss_fn(
+            tf.zeros_like(
+                advanced_outputs["negative_matching_scores"]
+            ),
+            advanced_outputs["negative_matching_scores"],
+        )
+
+        total_loss = positive_loss + negative_loss
+
+    gradients = tape.gradient(
+        total_loss,
+        advanced_model.trainable_variables,
     )
 
-    assert tuple(advanced_outputs["matching_scores"].shape) == (
-        batch_size,
-        num_captions,
+    assert gradients
+    assert all(gradient is not None for gradient in gradients)
+
+    for gradient in gradients:
+        tf.debugging.assert_all_finite(
+            gradient,
+            "Non-finite cross-modal gradient.",
+        )
+
+    assert tuple(
+        advanced_outputs["matching_scores"].shape
+    ) == (batch_size, num_captions)
+
+    assert tuple(
+        advanced_outputs["negative_matching_scores"].shape
+    ) == (batch_size, num_captions)
+
+    assert bool(
+        advanced_outputs["matching_negatives_valid"].numpy()
     )
 
     assert tuple(
@@ -565,8 +649,23 @@ def _run_full_model_tests():
         49,
     )
 
-    print("Cross-modal matching output: PASS")
+    print("Positive matching scores: PASS")
+    print("Negative matching scores: PASS")
     print("Cross-modal attention output: PASS")
+    print("Cross-modal gradient flow: PASS")
+
+    # Single-image batches must be marked as having no valid negatives.
+    single_outputs = advanced_model(
+        images[:1],
+        captions[:1],
+        training=False,
+    )
+
+    assert not bool(
+        single_outputs["matching_negatives_valid"].numpy()
+    )
+
+    print("Single-image negative-pair handling: PASS")
 
     print("-" * 60)
     print("All Full Model tests passed!")

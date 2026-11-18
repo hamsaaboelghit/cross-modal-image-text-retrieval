@@ -17,6 +17,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FOLD = 1
 SEED = 42
 BATCH_SIZE = 8
+
+# Total target epochs, not additional epochs after resuming.
 TOTAL_EPOCHS = 5
 
 VOCAB_PATH = (
@@ -36,10 +38,14 @@ CHECKPOINT_DIR = (
 
 
 def set_seed(seed):
+    """Set reproducible random seeds."""
+
     tf.keras.utils.set_random_seed(seed)
 
 
 def load_vocabulary():
+    """Load and validate the training vocabulary."""
+
     if not VOCAB_PATH.is_file():
         raise FileNotFoundError(
             f"Vocabulary not found: {VOCAB_PATH}"
@@ -56,10 +62,40 @@ def load_vocabulary():
             "Vocabulary must be a dictionary."
         )
 
+    if not vocabulary:
+        raise ValueError(
+            "Vocabulary cannot be empty."
+        )
+
+    for token, token_id in vocabulary.items():
+
+        if not isinstance(token, str):
+            raise TypeError(
+                "Vocabulary tokens must be strings."
+            )
+
+        if (
+            not isinstance(token_id, int)
+            or isinstance(token_id, bool)
+            or token_id < 0
+        ):
+            raise ValueError(
+                f"Invalid vocabulary ID for token: {token}"
+            )
+
+    token_ids = list(vocabulary.values())
+
+    if len(token_ids) != len(set(token_ids)):
+        raise ValueError(
+            "Vocabulary contains duplicate token IDs."
+        )
+
     return vocabulary
 
 
 def build_model(vocab_size):
+    """Build the retrieval model before checkpoint restoration."""
+
     model = CrossModalRetrievalModel(
         vocab_size=vocab_size,
         encoder_type="lstm",
@@ -90,20 +126,16 @@ def build_model(vocab_size):
         training=False,
     )
 
+    if not model.trainable_variables:
+        raise RuntimeError(
+            "The model has no trainable variables."
+        )
+
     return model
 
 
-def main():
-    print("\n" + "=" * 65)
-    print("VISIONMATCH AI - CONTINUE TRAINING")
-    print("=" * 65)
-
-    set_seed(SEED)
-
-    vocabulary = load_vocabulary()
-    vocab_size = len(vocabulary)
-
-    print(f"Vocabulary size: {vocab_size}")
+def create_datasets():
+    """Create training and validation datasets."""
 
     train_data = Flickr30kDataset(
         fold_number=FOLD,
@@ -114,6 +146,16 @@ def main():
         fold_number=FOLD,
         split="validation",
     )
+
+    if len(train_data) == 0:
+        raise RuntimeError(
+            "Training dataset is empty."
+        )
+
+    if len(validation_data) == 0:
+        raise RuntimeError(
+            "Validation dataset is empty."
+        )
 
     print(
         f"Training images: {len(train_data):,}"
@@ -135,6 +177,45 @@ def main():
         shuffle=False,
         prefetch=True,
     )
+
+    return train_dataset, validation_dataset
+
+
+def main():
+
+    print("\n" + "=" * 65)
+    print("VISIONMATCH AI - CONTINUE TRAINING")
+    print("=" * 65)
+
+    if TOTAL_EPOCHS <= 0:
+        raise ValueError(
+            "TOTAL_EPOCHS must be positive."
+        )
+
+    set_seed(SEED)
+
+    # -------------------------------------------------
+    # 1. Load vocabulary
+    # -------------------------------------------------
+
+    vocabulary = load_vocabulary()
+    vocab_size = len(vocabulary)
+
+    print(
+        f"Vocabulary size: {vocab_size}"
+    )
+
+    # -------------------------------------------------
+    # 2. Create datasets
+    # -------------------------------------------------
+
+    train_dataset, validation_dataset = (
+        create_datasets()
+    )
+
+    # -------------------------------------------------
+    # 3. Create training configuration
+    # -------------------------------------------------
 
     config = TrainingConfig(
         epochs=TOTAL_EPOCHS,
@@ -158,6 +239,10 @@ def main():
 
     config.display()
 
+    # -------------------------------------------------
+    # 4. Build model and loss
+    # -------------------------------------------------
+
     model = build_model(vocab_size)
 
     loss_fn = MultiPositiveInfoNCELoss(
@@ -169,6 +254,10 @@ def main():
         loss_fn=loss_fn,
         config=config,
     )
+
+    # -------------------------------------------------
+    # 5. Prepare checkpoint manager
+    # -------------------------------------------------
 
     CHECKPOINT_DIR.mkdir(
         parents=True,
@@ -184,6 +273,7 @@ def main():
     )
 
     if latest_checkpoint is not None:
+
         resume_from = str(CHECKPOINT_DIR)
 
         print(
@@ -191,14 +281,25 @@ def main():
         )
 
         print(
-            "Training will resume from the saved state."
+            "The training process will resume "
+            "from the saved state."
         )
 
     else:
+
         resume_from = None
 
-        print("\nNo checkpoint found.")
-        print("Starting a new training run.")
+        print(
+            "\nNo previous checkpoint was found."
+        )
+
+        print(
+            "Starting a new training run."
+        )
+
+    # -------------------------------------------------
+    # 6. Run training
+    # -------------------------------------------------
 
     history = trainer.fit(
         train_loader=train_dataset,
@@ -208,17 +309,21 @@ def main():
         resume_from=resume_from,
     )
 
+    # -------------------------------------------------
+    # 7. Display final results
+    # -------------------------------------------------
+
     print("\n" + "=" * 65)
-    print("TRAINING COMPLETED")
+    print("TRAINING RUN FINISHED")
     print("=" * 65)
 
-    if history["train_loss"]:
+    if history.get("train_loss"):
         print(
             f"Final training loss: "
             f"{history['train_loss'][-1]:.6f}"
         )
 
-    if history["val_loss"]:
+    if history.get("val_loss"):
         print(
             f"Final validation loss: "
             f"{history['val_loss'][-1]:.6f}"
@@ -228,7 +333,9 @@ def main():
         f"Checkpoint directory: {CHECKPOINT_DIR}"
     )
 
-    print("Test split was NOT used.")
+    print(
+        "Test split was NOT used."
+    )
 
 
 if __name__ == "__main__":

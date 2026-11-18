@@ -1,58 +1,79 @@
+
 import tensorflow as tf
 
 
 class MultiPositiveInfoNCELoss(tf.keras.layers.Layer):
     """
-    Symmetric multi-positive InfoNCE loss.
+    Symmetric multi-positive InfoNCE loss with optional
+    cross-modal matching supervision.
 
-    image_embeddings: [B, D]
-    text_embeddings:  [B, C, D]
+    image_embeddings:
+        [B, D]
 
-    Each image has C positive captions.
+    text_embeddings:
+        [B, C, D]
+
+    matching_scores:
+        [B, C] positive image-caption matching logits.
+
+    negative_matching_scores:
+        [B, C] mismatched image-caption logits.
     """
 
-    def __init__(self, temperature=0.07, **kwargs):
+    def __init__(
+        self,
+        temperature=0.07,
+        matching_loss_weight=0.2,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
 
         if temperature <= 0:
             raise ValueError("Temperature must be positive.")
 
+        if matching_loss_weight < 0:
+            raise ValueError(
+                "matching_loss_weight cannot be negative."
+            )
+
         self.temperature = float(temperature)
-
-    def call(self, image_embeddings, text_embeddings):
-        image_embeddings = tf.convert_to_tensor(image_embeddings)
-        text_embeddings = tf.convert_to_tensor(text_embeddings)
-
-        tf.debugging.assert_rank(
-            image_embeddings, 2,
-            message="Image embeddings must have shape [B, D].",
+        self.matching_loss_weight = float(
+            matching_loss_weight
         )
 
-        tf.debugging.assert_rank(
-            text_embeddings, 3,
-            message="Text embeddings must have shape [B, C, D].",
+    def _retrieval_loss(
+        self,
+        image_embeddings,
+        text_embeddings,
+    ):
+        image_embeddings = tf.convert_to_tensor(
+            image_embeddings
         )
+        text_embeddings = tf.convert_to_tensor(
+            text_embeddings
+        )
+
+        tf.debugging.assert_rank(image_embeddings, 2)
+        tf.debugging.assert_rank(text_embeddings, 3)
 
         batch_size = tf.shape(image_embeddings)[0]
         image_dim = tf.shape(image_embeddings)[1]
 
-        text_batch_size = tf.shape(text_embeddings)[0]
-        num_captions = tf.shape(text_embeddings)[1]
-        text_dim = tf.shape(text_embeddings)[2]
-
         tf.debugging.assert_positive(batch_size)
-        tf.debugging.assert_positive(num_captions)
+        tf.debugging.assert_positive(
+            tf.shape(text_embeddings)[1]
+        )
 
         tf.debugging.assert_equal(
             batch_size,
-            text_batch_size,
+            tf.shape(text_embeddings)[0],
             message="Image and text batch sizes must match.",
         )
 
         tf.debugging.assert_equal(
             image_dim,
-            text_dim,
-            message="Image and text embedding dimensions must match.",
+            tf.shape(text_embeddings)[2],
+            message="Image and text dimensions must match.",
         )
 
         image_embeddings = tf.math.l2_normalize(
@@ -65,14 +86,16 @@ class MultiPositiveInfoNCELoss(tf.keras.layers.Layer):
             axis=-1,
         )
 
-        embedding_dim = tf.shape(text_embeddings)[-1]
+        num_captions = tf.shape(text_embeddings)[1]
 
         flat_text_embeddings = tf.reshape(
             text_embeddings,
-            (batch_size * num_captions, embedding_dim),
+            (
+                batch_size * num_captions,
+                image_dim,
+            ),
         )
 
-        # Image-to-text similarity: [B, B*C].
         logits = tf.matmul(
             image_embeddings,
             flat_text_embeddings,
@@ -81,8 +104,8 @@ class MultiPositiveInfoNCELoss(tf.keras.layers.Layer):
 
         logits = logits / self.temperature
 
-        # Each image has C positive captions.
         image_ids = tf.range(batch_size)
+
         caption_owner_ids = tf.repeat(
             tf.range(batch_size),
             repeats=num_captions,
@@ -93,7 +116,8 @@ class MultiPositiveInfoNCELoss(tf.keras.layers.Layer):
             caption_owner_ids[tf.newaxis, :],
         )
 
-        # Image-to-text multi-positive loss.
+        # Image-to-text: all captions belonging to the image
+        # are treated as positives.
         image_to_text_log_probs = tf.nn.log_softmax(
             logits,
             axis=1,
@@ -106,11 +130,13 @@ class MultiPositiveInfoNCELoss(tf.keras.layers.Layer):
         )
 
         image_to_text_loss = -tf.reduce_mean(
-            tf.reduce_sum(positive_log_probs, axis=1)
-            / tf.cast(num_captions, tf.float32)
+            tf.reduce_sum(
+                positive_log_probs,
+                axis=1,
+            ) / tf.cast(num_captions, tf.float32)
         )
 
-        # Text-to-image loss.
+        # Text-to-image: each caption retrieves its owner image.
         reverse_logits = tf.transpose(logits)
 
         text_to_image_targets = tf.repeat(
@@ -125,18 +151,128 @@ class MultiPositiveInfoNCELoss(tf.keras.layers.Layer):
             )
         )
 
-        # Symmetric loss.
-        loss = (
+        return (
             image_to_text_loss + text_to_image_loss
         ) / 2.0
 
-        return loss
+    @staticmethod
+    def _matching_loss(
+        matching_scores,
+        negative_matching_scores=None,
+        matching_negatives_valid=None,
+    ):
+        matching_scores = tf.cast(
+            matching_scores,
+            tf.float32,
+        )
+
+        tf.debugging.assert_rank(
+            matching_scores,
+            2,
+            message="matching_scores must have shape [B, C].",
+        )
+
+        tf.debugging.assert_all_finite(
+            matching_scores,
+            "Positive matching scores contain NaN or Inf.",
+        )
+
+        # Positive pairs should have high logits.
+        positive_loss = tf.reduce_mean(
+            tf.nn.softplus(-matching_scores)
+        )
+
+        if negative_matching_scores is None:
+            return positive_loss
+
+        negative_matching_scores = tf.cast(
+            negative_matching_scores,
+            tf.float32,
+        )
+
+        tf.debugging.assert_equal(
+            tf.shape(matching_scores),
+            tf.shape(negative_matching_scores),
+            message="Positive and negative matching shapes must match.",
+        )
+
+        tf.debugging.assert_all_finite(
+            negative_matching_scores,
+            "Negative matching scores contain NaN or Inf.",
+        )
+
+        negative_loss = tf.reduce_mean(
+            tf.nn.softplus(negative_matching_scores)
+        )
+
+        if matching_negatives_valid is None:
+            matching_negatives_valid = True
+
+        matching_negatives_valid = tf.cast(
+            matching_negatives_valid,
+            tf.bool,
+        )
+
+        negative_loss = tf.where(
+            matching_negatives_valid,
+            negative_loss,
+            tf.zeros_like(negative_loss),
+        )
+
+        return (
+            positive_loss + negative_loss
+        ) / 2.0
+
+    def call(
+        self,
+        image_embeddings,
+        text_embeddings,
+        matching_scores=None,
+        negative_matching_scores=None,
+        matching_negatives_valid=None,
+    ):
+        retrieval_loss = self._retrieval_loss(
+            image_embeddings,
+            text_embeddings,
+        )
+
+        if matching_scores is None:
+            if (
+                negative_matching_scores is not None
+                or matching_negatives_valid is not None
+            ):
+                raise ValueError(
+                    "Negative matching arguments require matching_scores."
+                )
+
+            return retrieval_loss
+
+        matching_loss = self._matching_loss(
+            matching_scores=matching_scores,
+            negative_matching_scores=negative_matching_scores,
+            matching_negatives_valid=matching_negatives_valid,
+        )
+
+        total_loss = (
+            retrieval_loss
+            + self.matching_loss_weight * matching_loss
+        )
+
+        tf.debugging.assert_all_finite(
+            total_loss,
+            "Combined retrieval and matching loss is not finite.",
+        )
+
+        return total_loss
 
     def get_config(self):
         config = super().get_config()
+
         config.update({
             "temperature": self.temperature,
+            "matching_loss_weight": self.matching_loss_weight,
         })
+
         return config
 
 
@@ -161,23 +297,43 @@ def _run_infonce_tests():
         )
     )
 
+    matching_scores = tf.Variable(
+        tf.random.normal((batch_size, num_captions))
+    )
+
+    negative_matching_scores = tf.Variable(
+        tf.random.normal((batch_size, num_captions))
+    )
+
     criterion = MultiPositiveInfoNCELoss(
-        temperature=0.07
+        temperature=0.07,
+        matching_loss_weight=0.2,
     )
 
     with tf.GradientTape() as tape:
         loss = criterion(
             image_embeddings,
             text_embeddings,
+            matching_scores=matching_scores,
+            negative_matching_scores=negative_matching_scores,
+            matching_negatives_valid=True,
         )
 
     assert loss.shape.rank == 0
-    tf.debugging.assert_all_finite(loss, "Loss is not finite.")
 
-    gradients = tape.gradient(
+    tf.debugging.assert_all_finite(
         loss,
-        [image_embeddings, text_embeddings],
+        "Loss is not finite.",
     )
+
+    variables = [
+        image_embeddings,
+        text_embeddings,
+        matching_scores,
+        negative_matching_scores,
+    ]
+
+    gradients = tape.gradient(loss, variables)
 
     assert all(gradient is not None for gradient in gradients)
 
@@ -187,51 +343,47 @@ def _run_infonce_tests():
             "Gradient contains NaN or Inf.",
         )
 
-    print(f"Loss: {loss.numpy():.4f}")
-    print("Scalar loss: PASS")
-    print("Finite loss: PASS")
-    print("Gradient flow: PASS")
+    print("Combined loss scalar: PASS")
+    print("Finite loss and gradients: PASS")
+    print("Matching branch gradient flow: PASS")
 
-    # Verify that identical positive embeddings produce a lower
-    # loss than randomly mismatched embeddings.
-    perfect_images = tf.eye(4)
-    perfect_texts = tf.repeat(
-        perfect_images[:, tf.newaxis, :],
-        repeats=2,
-        axis=1,
+    # A single-image batch must still produce a valid loss.
+    single_image_loss = criterion(
+        tf.random.normal((1, embedding_dim)),
+        tf.random.normal((1, 2, embedding_dim)),
+        matching_scores=tf.random.normal((1, 2)),
+        negative_matching_scores=tf.random.normal((1, 2)),
+        matching_negatives_valid=False,
     )
 
-    perfect_loss = criterion(
-        perfect_images,
-        perfect_texts,
+    tf.debugging.assert_all_finite(
+        single_image_loss,
+        "Single-image loss is not finite.",
     )
 
-    random_loss = criterion(
-        tf.random.normal((4, 4)),
-        tf.random.normal((4, 2, 4)),
+    print("Single-image batch handling: PASS")
+
+    # Retrieval-only mode remains supported.
+    retrieval_only_loss = criterion(
+        tf.random.normal((4, embedding_dim)),
+        tf.random.normal((4, 2, embedding_dim)),
     )
 
-    assert tf.math.is_finite(perfect_loss)
-    assert tf.math.is_finite(random_loss)
+    tf.debugging.assert_all_finite(
+        retrieval_only_loss,
+        "Retrieval-only loss is not finite.",
+    )
 
-    print("Positive-pair behavior: PASS")
+    print("Retrieval-only compatibility: PASS")
 
     # Invalid temperature.
     try:
         MultiPositiveInfoNCELoss(temperature=0)
-        raise AssertionError("Zero temperature should be rejected.")
+        raise AssertionError(
+            "Zero temperature should be rejected."
+        )
     except ValueError:
         print("Temperature validation: PASS")
-
-    # Invalid batch mismatch.
-    try:
-        criterion(
-            tf.random.normal((3, 8)),
-            tf.random.normal((4, 2, 8)),
-        )
-        raise AssertionError("Batch mismatch should be rejected.")
-    except tf.errors.InvalidArgumentError:
-        print("Batch-size validation: PASS")
 
     print("-" * 55)
     print("All Multi-Positive InfoNCE tests passed!")

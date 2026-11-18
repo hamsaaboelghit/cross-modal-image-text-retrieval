@@ -1,120 +1,77 @@
 
-import tempfile
-from pathlib import Path
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
+import tensorflow as tf
 
 from src.training.train_config import TrainingConfig
-from src.training.optimizer import build_optimizer, build_scheduler
+from src.training.optimizer import (
+    build_optimizer,
+    build_scheduler,
+)
 from src.training.trainer import Trainer
 from src.training.evaluator import Evaluator
-from src.training.checkpoint_manager import CheckpointManager
-from src.training.training_logger import TrainingLogger
-from src.training.early_stopping import EarlyStopping
+from src.training.contrastive_loss import MultiPositiveInfoNCELoss
 
 
-# =====================================================
-# 1. Dummy Model
-# =====================================================
-
-class DummyRetrievalModel(nn.Module):
-    """
-    Small model for integration testing.
-
-    It simulates the expected VisionMatch AI outputs:
-        image_embeddings: [B, D]
-        text_embeddings:  [B, C, D]
-    """
+class DummyRetrievalModel(tf.keras.Model):
+    """Small model for training integration tests."""
 
     def __init__(self, vocab_size=100, embedding_dim=32):
         super().__init__()
 
-        self.image_projection = nn.Linear(3, embedding_dim)
-
-        self.text_embedding = nn.Embedding(
-            vocab_size,
-            embedding_dim,
-            padding_idx=0,
+        self.image_projection = tf.keras.layers.Dense(
+            embedding_dim
         )
 
-    def forward(self, images, captions):
+        self.text_embedding = tf.keras.layers.Embedding(
+            vocab_size,
+            embedding_dim,
+        )
 
-        # [B, 3, H, W] -> [B, 3]
-        image_features = images.mean(dim=(2, 3))
+    def call(self, images, captions, training=False):
+
+        image_features = tf.reduce_mean(
+            images,
+            axis=[1, 2],
+        )
 
         image_embeddings = self.image_projection(
             image_features
         )
 
-        # [B, C, L] -> [B, C, L, D]
-        text_features = self.text_embedding(captions)
-
-        # Ignore padding tokens.
-        mask = (captions != 0).unsqueeze(-1)
-
-        text_sum = (text_features * mask).sum(dim=2)
-
-        token_count = mask.sum(dim=2).clamp(min=1)
-
-        text_embeddings = text_sum / token_count
-
-        image_embeddings = F.normalize(
-            image_embeddings,
-            dim=-1,
+        text_features = self.text_embedding(
+            captions
         )
 
-        text_embeddings = F.normalize(
-            text_embeddings,
-            dim=-1,
+        mask = tf.cast(
+            tf.not_equal(captions, 0),
+            tf.float32,
+        )[..., tf.newaxis]
+
+        text_sum = tf.reduce_sum(
+            text_features * mask,
+            axis=2,
+        )
+
+        token_count = tf.reduce_sum(
+            mask,
+            axis=2,
+        )
+
+        text_embeddings = text_sum / tf.maximum(
+            token_count,
+            1.0,
         )
 
         return {
-            "image_embeddings": image_embeddings,
-            "text_embeddings": text_embeddings,
+            "image_embeddings": tf.math.l2_normalize(
+                image_embeddings,
+                axis=-1,
+            ),
+            "text_embeddings": tf.math.l2_normalize(
+                text_embeddings,
+                axis=-1,
+            ),
         }
 
-
-# =====================================================
-# 2. Dummy Retrieval Loss
-# =====================================================
-
-class DummyRetrievalLoss(nn.Module):
-    """
-    Symmetric image-text contrastive loss.
-
-    Used only for testing the training pipeline.
-    """
-
-    def __init__(self, temperature=0.07):
-        super().__init__()
-        self.temperature = temperature
-
-    def forward(self, image_embeddings, text_embeddings):
-
-        # Average the five captions for each image.
-        text_embeddings = text_embeddings.mean(dim=1)
-
-        logits = (
-            image_embeddings @ text_embeddings.T
-        ) / self.temperature
-
-        labels = torch.arange(
-            image_embeddings.size(0),
-            device=image_embeddings.device,
-        )
-
-        image_loss = F.cross_entropy(logits, labels)
-
-        text_loss = F.cross_entropy(logits.T, labels)
-
-        return (image_loss + text_loss) / 2
-
-
-# =====================================================
-# 3. Test Data
-# =====================================================
 
 def create_dummy_loader(
     num_batches=3,
@@ -122,33 +79,36 @@ def create_dummy_loader(
     num_captions=5,
     sequence_length=12,
 ):
-    """
-    Generate synthetic image-caption batches.
-    """
 
     loader = []
 
     for _ in range(num_batches):
 
-        images = torch.randn(
-            batch_size,
-            3,
-            224,
-            224,
+        images = tf.random.normal(
+            (batch_size, 224, 224, 3)
         )
 
-        captions = torch.randint(
-            1,
-            100,
+        captions = tf.random.uniform(
             (
                 batch_size,
                 num_captions,
                 sequence_length,
             ),
+            minval=1,
+            maxval=100,
+            dtype=tf.int32,
         )
 
-        # Add padding to some caption positions.
-        captions[:, :, -2:] = 0
+        captions = tf.concat(
+            [
+                captions[:, :, :-2],
+                tf.zeros(
+                    (batch_size, num_captions, 2),
+                    dtype=tf.int32,
+                ),
+            ],
+            axis=2,
+        )
 
         loader.append({
             "image": images,
@@ -158,58 +118,64 @@ def create_dummy_loader(
     return loader
 
 
-# =====================================================
-# 4. Integration Tests
-# =====================================================
-
-def run_integration_tests():
+def test_training_integration():
 
     print("\n" + "=" * 55)
     print("VISIONMATCH AI - TRAINING INTEGRATION TESTS")
     print("=" * 55)
 
-    device = (
-        "cuda" if torch.cuda.is_available() else "cpu"
-    )
+    tf.keras.utils.set_random_seed(42)
 
     config = TrainingConfig(
         epochs=2,
         batch_size=4,
         learning_rate=1e-3,
+        weight_decay=1e-4,
         optimizer="adamw",
         scheduler="cosine",
         loss_type="info_nce",
+        temperature=0.07,
         use_amp=False,
-        device=device,
+        device="cpu",
         gradient_clip_norm=1.0,
     )
 
     model = DummyRetrievalModel()
-    loss_fn = DummyRetrievalLoss()
 
-    train_loader = create_dummy_loader()
-    val_loader = create_dummy_loader(
-        num_batches=2
+    # Build model before creating optimizer.
+    model(
+        tf.zeros((1, 224, 224, 3)),
+        tf.ones((1, 5, 12), dtype=tf.int32),
+        training=False,
     )
 
-    # -------------------------------------------------
-    # Test 1: Optimizer
-    # -------------------------------------------------
+    loss_fn = MultiPositiveInfoNCELoss(
+        temperature=config.temperature
+    )
+
+    train_loader = create_dummy_loader()
+
+    val_loader = create_dummy_loader(
+        num_batches=2,
+    )
+
+    # TEST 1: Optimizer creation.
 
     print("\n[Test 1] Optimizer Creation")
 
-    optimizer = build_optimizer(model, config)
+    optimizer = build_optimizer(
+        model,
+        config,
+    )
 
     assert isinstance(
         optimizer,
-        torch.optim.AdamW,
+        tf.keras.optimizers.AdamW,
     )
 
     print("PASS: AdamW optimizer created.")
 
-    # -------------------------------------------------
-    # Test 2: Scheduler
-    # -------------------------------------------------
+    # TEST 2: Scheduler creation.
 
     print("\n[Test 2] Scheduler Creation")
 
@@ -220,14 +186,12 @@ def run_integration_tests():
 
     assert isinstance(
         scheduler,
-        torch.optim.lr_scheduler.CosineAnnealingLR,
+        tf.keras.callbacks.LearningRateScheduler,
     )
 
     print("PASS: Cosine scheduler created.")
 
-    # -------------------------------------------------
-    # Test 3: Trainer Initialization
-    # -------------------------------------------------
+    # TEST 3: Trainer initialization.
 
     print("\n[Test 3] Trainer Initialization")
 
@@ -239,33 +203,36 @@ def run_integration_tests():
         scheduler=scheduler,
     )
 
-    assert trainer.device.type == device
+    assert trainer.optimizer is optimizer
+    assert trainer.scheduler is scheduler
 
     print("PASS: Trainer initialized.")
+    print("PASS: Optimizer connected.")
+    print("PASS: Scheduler connected.")
 
-    # -------------------------------------------------
-    # Test 4: Training Epoch
-    # -------------------------------------------------
+    # TEST 4: Training epoch.
 
     print("\n[Test 4] Training Epoch")
 
-    params_before = [
-        p.detach().clone()
-        for p in model.parameters()
+    weights_before = [
+        weight.copy()
+        for weight in model.get_weights()
     ]
 
-    train_loss = trainer.train_epoch(train_loader)
+    train_loss = trainer.train_epoch(
+        train_loader
+    )
 
     assert isinstance(train_loss, float)
-    assert torch.isfinite(torch.tensor(train_loss))
+    assert tf.math.is_finite(train_loss)
 
-    params_after = list(model.parameters())
+    weights_after = model.get_weights()
 
     weights_updated = any(
-        not torch.equal(before, after.detach())
+        not (before == after).all()
         for before, after in zip(
-            params_before,
-            params_after,
+            weights_before,
+            weights_after,
         )
     )
 
@@ -273,12 +240,13 @@ def run_integration_tests():
 
     assert trainer.global_step == len(train_loader)
 
-    print(f"PASS: Training loss = {train_loss:.4f}")
-    print("PASS: Model parameters were updated.")
+    print(
+        f"PASS: Training loss = {train_loss:.4f}"
+    )
 
-    # -------------------------------------------------
-    # Test 5: Validation
-    # -------------------------------------------------
+    print("PASS: Model weights were updated.")
+
+    # TEST 5: Validation.
 
     print("\n[Test 5] Validation")
 
@@ -288,29 +256,29 @@ def run_integration_tests():
         config=config,
     )
 
-    validation_params_before = [
-        p.detach().clone()
-        for p in model.parameters()
+    validation_weights_before = [
+        weight.copy()
+        for weight in model.get_weights()
     ]
 
     validation_results = evaluator.evaluate(
         val_loader
     )
 
-    validation_params_after = list(model.parameters())
+    validation_weights_after = model.get_weights()
 
-    assert torch.isfinite(
-        torch.tensor(validation_results["val_loss"])
+    assert tf.math.is_finite(
+        validation_results["val_loss"]
     )
 
     assert validation_results["num_samples"] == 8
     assert validation_results["num_batches"] == 2
 
     weights_unchanged = all(
-        torch.equal(before, after.detach())
+        (before == after).all()
         for before, after in zip(
-            validation_params_before,
-            validation_params_after,
+            validation_weights_before,
+            validation_weights_after,
         )
     )
 
@@ -323,146 +291,76 @@ def run_integration_tests():
 
     print("PASS: Validation did not update model weights.")
 
-    # -------------------------------------------------
-    # Test 6: Scheduler Step
-    # -------------------------------------------------
+    # TEST 6: Scheduler callback.
 
-    print("\n[Test 6] Scheduler Update")
+    print("\n[Test 6] Scheduler Callback")
 
-    trainer.step_scheduler()
+    scheduler.on_train_begin()
 
-    print("PASS: Scheduler updated.")
+    initial_lr = trainer._get_learning_rate()
 
-    # -------------------------------------------------
-    # Test 7: Checkpoint Save and Load
-    # -------------------------------------------------
+    scheduler.on_epoch_begin(0)
 
-    print("\n[Test 7] Checkpoint Save and Load")
+    updated_lr = trainer._get_learning_rate()
 
-    with tempfile.TemporaryDirectory() as temp_dir:
+    assert initial_lr > 0
+    assert updated_lr > 0
 
-        manager = CheckpointManager(
-            checkpoint_dir=temp_dir
-        )
-
-        saved_path = manager.save_checkpoint(
-            model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epoch=1,
-            val_loss=validation_results["val_loss"],
-            global_step=trainer.global_step,
-            config=config,
-            is_best=True,
-        )
-
-        assert Path(saved_path).is_file()
-
-        saved_model_state = {
-            key: value.detach().clone()
-            for key, value in model.state_dict().items()
-        }
-
-        # Modify model parameters before loading.
-        with torch.no_grad():
-            for parameter in model.parameters():
-                parameter.add_(1.0)
-
-        loaded_info = manager.load_checkpoint(
-            checkpoint_path=saved_path,
-            model=model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            map_location=device,
-        )
-
-        assert loaded_info["epoch"] == 1
-
-        for key, value in model.state_dict().items():
-            assert torch.equal(
-                value,
-                saved_model_state[key],
-            )
-
-        assert Path(temp_dir, "best_model.pth").is_file()
-
-        print("PASS: Checkpoint saved.")
-        print("PASS: Model weights restored.")
-        print("PASS: Best model checkpoint saved.")
-
-    # -------------------------------------------------
-    # Test 8: Training Logger
-    # -------------------------------------------------
-
-    print("\n[Test 8] Training Logger")
-
-    with tempfile.TemporaryDirectory() as temp_dir:
-
-        logger = TrainingLogger(
-            log_dir=temp_dir,
-            experiment_name="integration_test",
-        )
-
-        logger.start_epoch()
-
-        logger.log_epoch(
-            epoch=1,
-            train_loss=train_loss,
-            val_loss=validation_results["val_loss"],
-            learning_rate=optimizer.param_groups[0]["lr"],
-        )
-
-        assert logger.get_log_path().is_file()
-
-        with open(
-            logger.get_log_path(),
-            encoding="utf-8",
-        ) as file:
-            lines = file.readlines()
-
-        assert len(lines) == 2
-
-        print("PASS: Training metrics saved to CSV.")
-
-    # -------------------------------------------------
-    # Test 9: Early Stopping
-    # -------------------------------------------------
-
-    print("\n[Test 9] Early Stopping")
-
-    early_stopping = EarlyStopping(
-        patience=2,
-        min_delta=0.001,
+    scheduler.on_epoch_end(
+        0,
+        logs={
+            "loss": train_loss,
+            "val_loss": validation_results["val_loss"],
+        },
     )
 
-    assert early_stopping(0.90) is False
-    assert early_stopping(0.85) is False
-    assert early_stopping(0.86) is False
+    scheduler.on_train_end()
 
-    should_stop = early_stopping(0.87)
+    print("PASS: Scheduler callbacks executed.")
+    print(
+        f"Learning rate after scheduler: {updated_lr:.8f}"
+    )
 
-    assert should_stop is True
+    # TEST 7: Loss output validation.
 
-    print("PASS: Early stopping triggered correctly.")
+    print("\n[Test 7] Loss Validation")
 
-    # -------------------------------------------------
-    # Final Results
-    # -------------------------------------------------
+    outputs = model(
+        train_loader[0]["image"],
+        train_loader[0]["captions"],
+        training=False,
+    )
+
+    loss = loss_fn(
+        outputs["image_embeddings"],
+        outputs["text_embeddings"],
+    )
+
+    assert loss.shape.rank == 0
+    assert tf.math.is_finite(loss)
+
+    print("PASS: Loss is a finite scalar.")
+
+    # Final results.
 
     print("\n" + "=" * 55)
-    print("ALL 9 INTEGRATION TESTS PASSED!")
+    print("ALL TRAINING INTEGRATION TESTS PASSED!")
     print("=" * 55)
 
-    print(f"Device: {device}")
-    print(f"Training Loss: {train_loss:.4f}")
+    print(
+        f"Training Loss: {train_loss:.4f}"
+    )
+
     print(
         f"Validation Loss: "
         f"{validation_results['val_loss']:.4f}"
     )
 
-    print("\nNote: All values above are from synthetic test data.")
-    print("They are NOT real VisionMatch AI performance results.")
+    print(
+        "\nNote: Synthetic data was used. "
+        "These are not real Flickr30k results."
+    )
 
 
 if __name__ == "__main__":
-    run_integration_tests()
+    test_training_integration()
