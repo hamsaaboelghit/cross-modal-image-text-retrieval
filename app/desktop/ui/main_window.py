@@ -77,7 +77,7 @@ class RetrievalWorker(QThread):
                 boundary = "----VisionMatchDesktopBoundary"
                 path = Path(self.image_path)
                 mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-                if mime not in {"image/jpeg", "image/png", "image/webp"}:
+                if mime not in {"image/jpeg", "image/png", "image/webp", "image/bmp", "image/x-ms-bmp"}:
                     raise ValueError("Choose a JPEG, PNG, or WEBP image.")
                 safe_name = path.name.replace('"', "").replace("\r", "").replace("\n", "")
                 with path.open("rb") as image_file:
@@ -936,7 +936,7 @@ class MainWindow(QMainWindow):
             self,
             "Select an Image",
             "",
-            "Images (*.png *.jpg *.jpeg *.webp)"
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp)"
         )
 
         if not file_path:
