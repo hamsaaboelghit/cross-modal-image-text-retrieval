@@ -42,10 +42,12 @@ def build_experiments():
     return [{"name": name, **base, **changes} for name, changes in specs]
 
 
-def metadata(all_experiments, epochs, batch_size):
+def metadata(all_experiments, epochs, batch_size, train_steps_per_epoch, validation_steps):
     return {
         "schema_version": 2, "fold": FOLD, "seed": SEED,
-        "epochs": epochs, "batch_size": batch_size, "learning_rate": LR,
+        "epochs": epochs, "batch_size": batch_size,
+        "train_steps_per_epoch": train_steps_per_epoch,
+        "validation_steps": validation_steps, "learning_rate": LR,
         "output_dim": OUTPUT_DIM, "dropout": DROPOUT,
         "selection_split": "validation", "test_set_used": False,
         "experiments": all_experiments,
@@ -117,10 +119,16 @@ def save_results(rows):
     temp.replace(path)
 
 
-def run_all(experiments, all_experiments, epochs, batch_size, resume, overwrite):
+def run_all(
+    experiments, all_experiments, epochs, batch_size,
+    train_steps_per_epoch, validation_steps, resume, overwrite
+):
     OUT.mkdir(parents=True, exist_ok=True)
     meta_path, results_path = OUT / "phase5_run_metadata.json", OUT / "phase5_results.json"
-    expected = metadata(all_experiments, epochs, batch_size)
+    expected = metadata(
+        all_experiments, epochs, batch_size,
+        train_steps_per_epoch, validation_steps,
+    )
     if resume:
         if not meta_path.is_file() or not results_path.is_file():
             raise FileNotFoundError("Resume needs existing Phase 5 metadata and results.")
@@ -160,6 +168,8 @@ def run_all(experiments, all_experiments, epochs, batch_size, resume, overwrite)
                 learning_rate=LR, loss_type=config["loss_type"],
                 margin=config["margin"], output_dim=OUTPUT_DIM,
                 dropout=DROPOUT, log_dir="runs/phase5_data_strategy",
+                max_train_steps_per_epoch=train_steps_per_epoch,
+                max_validation_steps=validation_steps,
             )
             metrics = evaluate_checkpoint(config, batch_size)
             t2i, i2t = metrics["text_to_image"], metrics["image_to_text"]
@@ -209,6 +219,14 @@ def main():
     parser = argparse.ArgumentParser(description="Phase 5 controlled data and initialization experiments.")
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument(
+        "--train-steps-per-epoch", type=int, default=250,
+        help="Training batches per epoch; use 0 only if you change the code (must be positive).",
+    )
+    parser.add_argument(
+        "--validation-steps", type=int, default=100,
+        help="Validation batches per epoch; final retrieval evaluation still uses the full validation split.",
+    )
+    parser.add_argument(
         "--batch-size", type=int, default=4,
         help="Per-device batch size. Default 4 is conservative for GPUs with 6 GB VRAM.",
     )
@@ -221,6 +239,10 @@ def main():
         parser.error("--epochs must be positive.")
     if args.batch_size <= 0:
         parser.error("--batch-size must be positive.")
+    if args.train_steps_per_epoch <= 0:
+        parser.error("--train-steps-per-epoch must be positive.")
+    if args.validation_steps <= 0:
+        parser.error("--validation-steps must be positive.")
     if args.resume and args.overwrite:
         parser.error("--resume and --overwrite cannot be combined.")
 
@@ -246,6 +268,7 @@ def main():
         return
     run_all(
         experiments, all_experiments, args.epochs, args.batch_size,
+        args.train_steps_per_epoch, args.validation_steps,
         args.resume, args.overwrite,
     )
 
