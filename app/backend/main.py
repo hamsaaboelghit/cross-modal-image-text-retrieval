@@ -163,7 +163,7 @@ def _normalise_result(item: dict[str, Any], rank: int) -> dict[str, Any]:
 
 @app.get("/", tags=["System"], summary="API root")
 def root():
-    return {"name": "VisionMatch AI API", "docs": "/docs", "health": "/health"}
+    return {"name": "VisionMatch AI API", "message": "VisionMatch AI API is running.", "docs": "/docs", "health": "/health"}
 
 
 @app.get("/health", tags=["System"], summary="Check API and inference readiness")
