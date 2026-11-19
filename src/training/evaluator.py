@@ -98,8 +98,6 @@ class Evaluator:
         matching_batches_skipped = 0
 
         for batch_index, batch in enumerate(val_loader):
-            if max_batches is not None and batch_index >= max_batches:
-                break
             images, captions = self._prepare_batch(batch)
             batch_size = int(tf.shape(images)[0].numpy())
 
@@ -139,6 +137,9 @@ class Evaluator:
             if matching_loss is not None:
                 matching_loss_sum += float(matching_loss.numpy()) * batch_size
                 matching_samples += batch_size
+
+            if max_batches is not None and batch_index + 1 >= max_batches:
+                break
 
         if total_samples == 0:
             raise RuntimeError("The validation dataset is empty.")
