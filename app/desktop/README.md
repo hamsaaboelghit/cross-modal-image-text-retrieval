@@ -1,13 +1,13 @@
 # VisionMatch AI Desktop Application
 
-The desktop client is a PySide6 application for the same FastAPI retrieval service used by the website. It is an inference-only client: it does not import TensorFlow, load checkpoints, build galleries, or train models. Install the GUI dependencies separately so the core training environment stays independent of Qt.
+The desktop client is a PySide6 application for the same FastAPI retrieval service used by the website. It is an inference-only client: it does not import TensorFlow, load checkpoints, build galleries, or train models. All Python dependencies, including PySide6, are managed in the single root `requirements.txt` file.
 
 ## Install
 
-From the repository root, activate the project virtual environment and install the optional desktop dependencies:
+From the repository root, activate the project virtual environment and install all project dependencies:
 
 ```bash
-python -m pip install -r requirements-desktop.txt
+python -m pip install -r requirements.txt
 ```
 
 ## Configure the backend
