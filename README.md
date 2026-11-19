@@ -848,3 +848,48 @@ The repository contains project code and configuration files; dataset images, tr
 VisionMatch AI aims to bridge the gap between computer vision and natural language by learning meaningful shared representations of images and text.
 
 Through the exploration of different deep learning architectures, attention mechanisms, and contrastive learning objectives, the project provides a foundation for flexible bidirectional image–text retrieval systems.
+
+
+## Evaluating a Completed Checkpoint
+
+For timestamped experiments or short-budget comparison runs, use the metadata-aware evaluator rather than assuming the legacy five-epoch configuration:
+
+```bash
+python -m src.evaluation.evaluate_checkpoint \
+  --checkpoint checkpoints/experiments/deadline_fast_20261119_rnn_fold1_seed42 \
+  --model-type full \
+  --encoder-type rnn
+```
+
+Examples for the other full-model architectures:
+
+```bash
+python -m src.evaluation.evaluate_checkpoint --checkpoint <CHECKPOINT_DIR> --model-type full --encoder-type lstm
+python -m src.evaluation.evaluate_checkpoint --checkpoint <CHECKPOINT_DIR> --model-type full --encoder-type gru
+python -m src.evaluation.evaluate_checkpoint --checkpoint <CHECKPOINT_DIR> --model-type full --encoder-type transformer
+```
+
+For the cross-modal model, evaluate the retrieval embeddings and the matching head separately:
+
+```bash
+python -m src.evaluation.evaluate_checkpoint \
+  --checkpoint <CHECKPOINT_DIR> \
+  --model-type full \
+  --encoder-type lstm \
+  --cross-modal-attention \
+  --evaluate-matching
+```
+
+For the baseline, use:
+
+```bash
+python -m src.evaluation.evaluate_checkpoint \
+  --checkpoint <BASELINE_CHECKPOINT_DIR> \
+  --model-type baseline
+```
+
+The evaluator defaults to a validation batch size of 4 to limit memory use. It writes a JSON result under `results/checkpoint_evaluations/` unless `--output` is supplied. The held-out test split is never loaded by this script.
+
+**Important:** The checkpoint metadata stores the training configuration (such as epochs, batch size, learning rate, seed, fold, and optimizer), but the current training pipeline does not store every model-architecture argument in that metadata. Supply the exact architecture used for that checkpoint. The evaluator records the supplied architecture beside the metrics. Do not guess it; check the run command/log first. In particular, preserve whether the run used pretrained ResNet50, backbone unfreezing, cross-modal attention, and the matching branch.
+
+The reported I2T Recall@K means that at least one of the five reference captions for an image is present in the top K. It does not mean that all five captions were retrieved.
