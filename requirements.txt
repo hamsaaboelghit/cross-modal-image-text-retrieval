@@ -15,6 +15,7 @@ tensorflow>=2.16.2,<2.22.0
 # Backend and API
 fastapi>=0.110,<1.0
 uvicorn[standard]>=0.27,<1.0
+python-dotenv>=1.0,<2.0
 python-multipart>=0.0.9
 
 # Testing
