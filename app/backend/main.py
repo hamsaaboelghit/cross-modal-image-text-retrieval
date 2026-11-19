@@ -313,6 +313,7 @@ def get_metrics():
                 "image_to_text": payload.get("image_to_text", {}),
                 "num_images": payload.get("num_images"),
                 "embedding_dim": payload.get("embedding_dim"),
+                "latency_ms": payload.get("latency_ms"),
                 "test_set_used": payload.get("test_set_used"),
                 "source": str(metric_file),
             })
@@ -352,6 +353,7 @@ def get_metrics():
             "image_to_text": payload.get("image_to_text", {}),
             "num_images": payload.get("num_images"),
             "embedding_dim": payload.get("embedding_dim"),
+            "latency_ms": payload.get("latency_ms"),
             "test_set_used": payload.get("test_set_used"),
             "source": path.name,
         }]}
