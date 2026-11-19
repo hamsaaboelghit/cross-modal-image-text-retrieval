@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QSizePolicy,
     QComboBox,
+    QScrollArea,
 )
 
 
@@ -625,7 +626,6 @@ class MainWindow(QMainWindow):
 
         self.results_area = QFrame()
         self.results_area.setMinimumHeight(90)
-        self.results_area.setMaximumHeight(280)
 
         self.results_area.setStyleSheet("""
             QFrame {
@@ -665,7 +665,12 @@ class MainWindow(QMainWindow):
         self.results_layout.addWidget(results_text)
         self.results_layout.addWidget(results_hint)
 
-        layout.addWidget(self.results_area)
+        self.results_scroll = QScrollArea()
+        self.results_scroll.setWidgetResizable(True)
+        self.results_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.results_scroll.setMaximumHeight(300)
+        self.results_scroll.setWidget(self.results_area)
+        layout.addWidget(self.results_scroll)
 
         return page
 
@@ -1013,7 +1018,7 @@ class MainWindow(QMainWindow):
         self.clear_results(
             f"{len(results)} result(s) · {payload.get('elapsed_ms', 0):.1f} ms · {payload.get('model', self.model_type)}"
         )
-        for item in results[:5]:
+        for item in results[:int(self.top_k_combo.currentText())]:
             kind = item.get("type", "result")
             value = item.get("caption") or item.get("image_id") or item.get("result") or "Matching item"
             if isinstance(value, dict):
