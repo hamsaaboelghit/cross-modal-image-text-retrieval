@@ -33,6 +33,10 @@ def run_experiment(
     use_cross_modal_attention=False,
     pretrained=True,
     unfreeze_last_block=False,
+    train_all_backbone=False,
+    caption_count=5,
+    image_augmentation="none",
+    negative_sampling_strategy="random",
     epochs=5,
     batch_size=8,
     seed=42,
@@ -102,7 +106,15 @@ def run_experiment(
     vocab_size = len(vocabulary)
     print(f"Vocabulary size: {vocab_size}")
 
-    train_data = Flickr30kDataset(fold, "train")
+    train_data = Flickr30kDataset(
+        fold,
+        "train",
+        caption_count=caption_count,
+        caption_seed=seed,
+        image_augmentation=image_augmentation,
+    )
+    # Keep all five reference captions for validation regardless of the
+    # training caption ablation, so evaluation remains comparable.
     val_data = Flickr30kDataset(fold, "validation")
 
     print(f"Training images: {len(train_data):,}")
@@ -118,6 +130,7 @@ def run_experiment(
         loss_type=loss_type,
         temperature=temperature,
         margin=margin,
+        negative_sampling_strategy=negative_sampling_strategy,
         use_amp=False,
         num_workers=0,
         pin_memory=False,
@@ -169,6 +182,7 @@ def run_experiment(
             use_attention=True,
             pretrained=pretrained,
             unfreeze_last_block=unfreeze_last_block,
+            train_all_backbone=train_all_backbone,
             use_cross_modal_attention=use_cross_modal_attention,
         )
 
@@ -183,13 +197,20 @@ def run_experiment(
     print(f"Loss margin: {margin if loss_type != 'info_nce' else 'N/A'}")
     print(f"Cross-modal attention: {use_cross_modal_attention}")
     print(f"Pretrained ResNet50: {pretrained}")
+    print(f"Train all ResNet layers: {train_all_backbone}")
+    print(f"Training captions per image: {caption_count}")
+    print(f"Training image augmentation: {image_augmentation}")
+    print(f"Negative sampling strategy: {negative_sampling_strategy}")
 
     if loss_type == "info_nce":
         loss_fn = MultiPositiveInfoNCELoss(temperature=config.temperature)
     elif loss_type == "margin":
         loss_fn = MarginBasedContrastiveLoss(margin=config.margin)
     else:
-        loss_fn = TripletContrastiveLoss(margin=config.margin)
+        loss_fn = TripletContrastiveLoss(
+            margin=config.margin,
+            negative_sampling_strategy=config.negative_sampling_strategy,
+        )
 
     trainer = Trainer(
         model=model,

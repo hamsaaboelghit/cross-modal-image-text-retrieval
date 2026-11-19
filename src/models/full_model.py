@@ -46,6 +46,7 @@ class CrossModalRetrievalModel(tf.keras.Model):
         use_attention=True,
         pretrained=True,
         unfreeze_last_block=False,
+        train_all_backbone=False,
         projection_dropout=0.1,
         use_cross_modal_attention=False,
         cross_modal_num_heads=8,
@@ -63,6 +64,7 @@ class CrossModalRetrievalModel(tf.keras.Model):
         self.image_encoder = ImageEncoder(
             pretrained=pretrained,
             unfreeze_last_block=unfreeze_last_block,
+            train_all_backbone=train_all_backbone,
             name="image_encoder",
         )
 

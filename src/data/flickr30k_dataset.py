@@ -43,6 +43,9 @@ class Flickr30kDataset:
         image_size=IMAGE_SIZE,
         max_length=MAX_LENGTH,
         expected_captions=EXPECTED_CAPTIONS,
+        caption_count=EXPECTED_CAPTIONS,
+        caption_seed=42,
+        image_augmentation="none",
     ):
         if split not in {"train", "validation", "test"}:
             raise ValueError(
@@ -59,6 +62,17 @@ class Flickr30kDataset:
         self.image_size = image_size
         self.max_length = max_length
         self.expected_captions = expected_captions
+        if not isinstance(caption_count, int) or isinstance(caption_count, bool):
+            raise TypeError("caption_count must be an integer.")
+        if caption_count < 1 or caption_count > expected_captions:
+            raise ValueError("caption_count must be between 1 and expected_captions.")
+        if image_augmentation not in {"none", "light"}:
+            raise ValueError("image_augmentation must be 'none' or 'light'.")
+        if image_augmentation != "none" and split != "train":
+            raise ValueError("Image augmentation is only allowed for the training split.")
+        self.caption_count = caption_count
+        self.caption_seed = int(caption_seed)
+        self.image_augmentation = image_augmentation
 
         data_path = (
             self.encoded_dir
@@ -138,6 +152,16 @@ class Flickr30kDataset:
                 dtype=np.int32
             )
 
+        # For the one-caption ablation, choose one caption per image once
+        # using a seeded generator. Validation/test always retain all captions.
+        self.selected_caption_indices = {}
+        if self.caption_count == 1:
+            rng = np.random.default_rng(self.caption_seed)
+            self.selected_caption_indices = {
+                image_name: int(rng.integers(0, self.expected_captions))
+                for image_name in self.image_names
+            }
+
     @staticmethod
     def _parse_sequence(value):
         """Convert a JSON-encoded caption sequence into integer IDs."""
@@ -187,6 +211,11 @@ class Flickr30kDataset:
 
         image = self._load_image(image_name)
         captions = self.captions_by_image[image_name]
+        if self.caption_count == 1:
+            selected_index = self.selected_caption_indices[image_name]
+            captions = captions[selected_index:selected_index + 1]
+        elif self.caption_count != self.expected_captions:
+            captions = captions[:self.caption_count]
 
         return {
             "image": image,
@@ -222,7 +251,7 @@ class Flickr30kDataset:
             ),
             "captions": tf.TensorSpec(
                 shape=(
-                    self.expected_captions,
+                    self.caption_count,
                     self.max_length
                 ),
                 dtype=tf.int32,
@@ -265,6 +294,48 @@ class Flickr30kDataset:
             batch_size,
             drop_remainder=drop_remainder,
         )
+
+        if self.image_augmentation == "light":
+            dataset = dataset.enumerate()
+
+            def augment_batch(batch_index, batch):
+                images = batch["image"]
+                local_indices = tf.range(tf.shape(images)[0], dtype=tf.int32)
+
+                def augment_one(inputs):
+                    image, local_index = inputs
+                    example_index = (
+                        tf.cast(batch_index, tf.int32) * tf.shape(images)[0]
+                        + local_index
+                    )
+                    base_seed = tf.stack([
+                        tf.cast(seed, tf.int32),
+                        example_index,
+                    ])
+                    image = tf.image.stateless_random_brightness(
+                        image, max_delta=12.0, seed=base_seed
+                    )
+                    image = tf.image.stateless_random_contrast(
+                        image, lower=0.9, upper=1.1,
+                        seed=tf.random.experimental.stateless_fold_in(base_seed, 1),
+                    )
+                    image = tf.image.stateless_random_saturation(
+                        image, lower=0.9, upper=1.1,
+                        seed=tf.random.experimental.stateless_fold_in(base_seed, 2),
+                    )
+                    return tf.clip_by_value(image, 0.0, 255.0)
+
+                augmented_images = tf.map_fn(
+                    augment_one,
+                    (images, local_indices),
+                    fn_output_signature=tf.float32,
+                )
+                return {**batch, "image": augmented_images}
+
+            dataset = dataset.map(
+                augment_batch,
+                num_parallel_calls=num_parallel_calls,
+            )
 
         if prefetch:
             dataset = dataset.prefetch(tf.data.AUTOTUNE)

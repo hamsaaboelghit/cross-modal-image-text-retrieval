@@ -12,13 +12,16 @@ class TripletContrastiveLoss(tf.keras.layers.Layer):
     A negative caption is sampled from a different image.
     """
 
-    def __init__(self, margin=0.2, **kwargs):
+    def __init__(self, margin=0.2, negative_sampling_strategy="random", **kwargs):
         super().__init__(**kwargs)
 
         if margin <= 0:
             raise ValueError("Margin must be positive.")
+        if negative_sampling_strategy not in {"random", "hardest"}:
+            raise ValueError("negative_sampling_strategy must be 'random' or 'hardest'.")
 
         self.margin = float(margin)
+        self.negative_sampling_strategy = negative_sampling_strategy
 
     def call(
         self,
@@ -136,33 +139,54 @@ class TripletContrastiveLoss(tf.keras.layers.Layer):
             positive_indices,
         )
 
-        # Select a negative image guaranteed to be different.
-        if training is False:
-            negative_image_indices = (batch_indices + 1) % batch_size
-            negative_caption_indices = tf.zeros((batch_size,), dtype=tf.int32)
+        # Choose a negative caption from another image. Hardest-negative
+        # mining selects the most similar non-matching caption in the batch.
+        if self.negative_sampling_strategy == "hardest":
+            flat_text_embeddings = tf.reshape(
+                text_embeddings, (batch_size * num_captions, image_dim)
+            )
+            similarities = tf.matmul(
+                image_embeddings, flat_text_embeddings, transpose_b=True
+            )
+            caption_owner_ids = tf.repeat(
+                tf.range(batch_size), repeats=num_captions
+            )
+            valid_negative_mask = tf.not_equal(
+                batch_indices[:, tf.newaxis],
+                caption_owner_ids[tf.newaxis, :],
+            )
+            similarities = tf.where(
+                valid_negative_mask,
+                similarities,
+                tf.fill(tf.shape(similarities), tf.constant(-1e9, tf.float32)),
+            )
+            hardest_flat_indices = tf.argmax(
+                similarities, axis=1, output_type=tf.int32
+            )
+            negative_embeddings = tf.gather(
+                flat_text_embeddings, hardest_flat_indices
+            )
         else:
-            offsets = tf.random.uniform(
-                shape=(batch_size,), minval=1, maxval=batch_size,
-                dtype=tf.int32,
-            )
-            negative_image_indices = (batch_indices + offsets) % batch_size
-            negative_caption_indices = tf.random.uniform(
-                shape=(batch_size,), minval=0, maxval=num_captions,
-                dtype=tf.int32,
-            )
+            if training is False:
+                negative_image_indices = (batch_indices + 1) % batch_size
+                negative_caption_indices = tf.zeros((batch_size,), dtype=tf.int32)
+            else:
+                offsets = tf.random.uniform(
+                    shape=(batch_size,), minval=1, maxval=batch_size,
+                    dtype=tf.int32,
+                )
+                negative_image_indices = (batch_indices + offsets) % batch_size
+                negative_caption_indices = tf.random.uniform(
+                    shape=(batch_size,), minval=0, maxval=num_captions,
+                    dtype=tf.int32,
+                )
 
-        negative_indices = tf.stack(
-            [
-                negative_image_indices,
-                negative_caption_indices,
-            ],
-            axis=1,
-        )
-
-        negative_embeddings = tf.gather_nd(
-            text_embeddings,
-            negative_indices,
-        )
+            negative_indices = tf.stack(
+                [negative_image_indices, negative_caption_indices], axis=1
+            )
+            negative_embeddings = tf.gather_nd(
+                text_embeddings, negative_indices
+            )
 
         # Euclidean distances.
         positive_distances = tf.norm(
@@ -188,6 +212,7 @@ class TripletContrastiveLoss(tf.keras.layers.Layer):
         config = super().get_config()
         config.update({
             "margin": self.margin,
+            "negative_sampling_strategy": self.negative_sampling_strategy,
         })
         return config
 

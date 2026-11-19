@@ -19,6 +19,7 @@ class ImageEncoder(tf.keras.Model):
         self,
         pretrained=True,
         unfreeze_last_block=False,
+        train_all_backbone=False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -34,8 +35,23 @@ class ImageEncoder(tf.keras.Model):
         self.output_dim = 2048
         self.spatial_dim = 2048
 
-        # Freeze the complete backbone first.
+        if unfreeze_last_block and train_all_backbone:
+            raise ValueError(
+                "Choose either unfreeze_last_block or train_all_backbone, not both."
+            )
+
+        # Default architecture-comparison runs keep ResNet frozen.
         self.backbone.trainable = False
+
+        # Full fine-tuning is used for the controlled pretrained-vs-scratch
+        # initialization comparison. BatchNorm remains frozen for stability.
+        if train_all_backbone:
+            self.backbone.trainable = True
+            for layer in self.backbone.layers:
+                if isinstance(layer, tf.keras.layers.BatchNormalization):
+                    layer.trainable = False
+                else:
+                    layer.trainable = True
 
         # Optionally fine-tune the final ResNet stage.
         if unfreeze_last_block:

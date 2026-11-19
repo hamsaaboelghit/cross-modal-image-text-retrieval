@@ -31,6 +31,7 @@ class TrainingConfig:
     loss_type: str = "info_nce"
     temperature: float = 0.07
     margin: float = 0.2
+    negative_sampling_strategy: str = "random"
 
     # Cross-modal matching loss
     matching_loss_weight: float = 0.2
@@ -168,6 +169,11 @@ class TrainingConfig:
         ):
             raise ValueError(
                 "margin must be finite, greater than 0, and at most 2."
+            )
+
+        if self.negative_sampling_strategy not in {"random", "hardest"}:
+            raise ValueError(
+                "negative_sampling_strategy must be 'random' or 'hardest'."
             )
 
         # Cross-modal matching loss validation
