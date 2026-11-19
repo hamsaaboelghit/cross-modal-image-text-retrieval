@@ -262,8 +262,6 @@ class Trainer:
         total_samples = 0
 
         for batch_index, batch in enumerate(train_loader):
-            if max_steps is not None and batch_index >= max_steps:
-                break
             images, captions = self._prepare_batch(batch)
 
             batch_size = int(tf.shape(images)[0].numpy())
@@ -336,6 +334,9 @@ class Trainer:
                     f"Batch [{batch_index + 1}] "
                     f"Loss: {float(loss.numpy()):.4f}"
                 )
+
+            if max_steps is not None and batch_index + 1 >= max_steps:
+                break
 
         if total_samples == 0:
             raise RuntimeError("The training dataset is empty.")
