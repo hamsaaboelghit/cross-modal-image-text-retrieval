@@ -25,8 +25,7 @@ The project explores different neural network architectures, attention mechanism
 - [Running the Project](#running-the-project)
 - [Project Structure](#project-structure)
 - [Testing](#testing)
-- [Current Implementation Status](#current-implementation-status)
-- [Technologies](#technologies)
+- [Technologies Used](#technologies-used)
 - [Dataset and Usage Notice](#dataset-and-usage-notice)
 
 ---
