@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QMessageBox,
     QSizePolicy,
+    QComboBox,
 )
 
 
@@ -581,6 +582,14 @@ class MainWindow(QMainWindow):
             }
         """)
 
+        self.top_k_combo = QComboBox()
+        self.top_k_combo.addItems(["5", "10", "20", "50"])
+        self.top_k_combo.setCurrentText("5")
+        self.top_k_combo.setMinimumHeight(40)
+        self.top_k_combo.setToolTip("Number of retrieval results")
+        bottom_layout.addWidget(QLabel("Top results:"))
+        bottom_layout.addWidget(self.top_k_combo)
+
         self.search_btn.clicked.connect(self.handle_search)
         bottom_layout.addWidget(self.search_btn)
 
@@ -877,7 +886,7 @@ class MainWindow(QMainWindow):
             self,
             "Select an Image",
             "",
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp)"
+            "Images (*.png *.jpg *.jpeg *.webp)"
         )
 
         if not file_path:
@@ -970,7 +979,7 @@ class MainWindow(QMainWindow):
             mode=self.current_mode,
             query=query if self.current_mode == "text" else "",
             image_path=self.selected_image_path,
-            top_k=5,
+            top_k=int(self.top_k_combo.currentText()),
             model=self.model_type,
         )
         self.search_worker.succeeded.connect(self.on_search_success)
