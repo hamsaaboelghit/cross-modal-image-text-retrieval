@@ -7,6 +7,8 @@ on:
       - "src/models/**"
       - "src/retrieval/**"
       - "src/data/vocabulary.py"
+      - "src/data/image_files.py"
+      - "src/data/test_image_files.py"
       - ".github/workflows/backend-ci.yml"
   push:
     branches:
@@ -44,5 +46,5 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install "numpy==1.26.4" "tensorflow-cpu==2.16.2" "fastapi>=0.110,<1.0" "uvicorn[standard]>=0.27,<1.0" "python-multipart>=0.0.9" "python-dotenv>=1.0,<2.0" "httpx>=0.27,<1.0" "Pillow>=10,<12" "pytest>=8,<9"
 
-      - name: Run backend tests
-        run: python -m pytest app/backend/test_main.py app/backend/test_retrieval_service.py -v
+      - name: Run backend and dataset utility tests
+        run: python -m pytest app/backend/test_main.py app/backend/test_retrieval_service.py src/data/test_image_files.py -v
