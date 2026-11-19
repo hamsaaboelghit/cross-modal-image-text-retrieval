@@ -23,6 +23,7 @@ type SearchResponse = {
   elapsed_ms: number;
   results: SearchResult[];
 };
+// Search requests are sent to the configured FastAPI inference service.
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
 
 export default function Home() {
