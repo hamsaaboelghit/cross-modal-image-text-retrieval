@@ -26,7 +26,7 @@ Interactive API documentation is available at `http://localhost:8000/docs`; the 
 - `VISIONMATCH_MAX_UPLOAD_BYTES`: maximum image upload size (default 10 MiB).
 - `VISIONMATCH_CORS_ORIGINS`: comma-separated allowed frontend origins.
 
-The current service instance loads one model at a time. To serve multiple architectures, launch separate API processes with distinct ports and model/checkpoint/gallery settings, or implement a model registry. The `model` request field is validated against the model served by the current process; it does not hot-swap TensorFlow models.
+The current service instance loads one model at a time. To serve multiple architectures, launch separate API processes with distinct ports and model/checkpoint/gallery settings, or implement a model registry. The `model` request field is validated against the model served by the current process; it does not hot-swap TensorFlow models. The `/metrics` endpoint can aggregate the `retrieval_metrics.json` files produced under `results/experiments/<experiment>/` by the evaluation runner.
 
 ## Endpoints
 
