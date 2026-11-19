@@ -9,7 +9,7 @@ Install the repository requirements, prepare the dataset vocabulary, trained che
 From the repository root:
 
 ```bash
-uvicorn app.backend.main:app --host 0.0.0.0 --port 8000
+uvicorn app.backend.main:app --env-file .env --host 0.0.0.0 --port 8000
 ```
 
 Interactive API documentation is available at `http://localhost:8000/docs`; the OpenAPI schema is at `/openapi.json`.
