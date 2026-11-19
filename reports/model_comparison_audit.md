@@ -26,7 +26,7 @@ The goal is to verify their architectures, shared training settings, differences
 - **Transformer:** Uses ResNet50 and a Transformer-based text encoder.
 - **Cross-Modal Attention:** Uses the same ResNet50 + LSTM foundation, with an additional cross-modal attention and matching branch.
 
-The full models use a 300-dimensional token embedding and a 512-dimensional hidden representation. Their shared retrieval embedding is fixed at 512 in the current implementation.
+The full models use a 300-dimensional token embedding and a 512-dimensional hidden representation by default. The retrieval embedding dimension is configurable through `output_dim` (default: 512) in `CrossModalRetrievalModel`.
 
 ## 3. Verified Training Configuration
 
@@ -111,7 +111,7 @@ The models have different architectures and parameter counts. This is expected, 
 
 **5. Retrieval embedding configuration**
 
-The runner accepts an `output_dim` argument, but currently passes it only to the Baseline model. The full model fixes its retrieval embedding dimension at 512. Therefore, changing `output_dim` does not currently change the full-model embedding dimension.
+`CrossModalRetrievalModel` accepts `output_dim` (default 512), and `experiment_runner.py` passes the configured value to the full-model constructor. The model uses this value for both image and text projection outputs. An automated regression test now checks that setting `output_dim=256` produces image embeddings shaped `[B, 256]` and text embeddings shaped `[B, C, 256]`.
 
 ## 6. Data and Evaluation Notes
 
