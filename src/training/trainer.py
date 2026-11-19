@@ -249,7 +249,12 @@ class Trainer:
 
         return negative_outputs["matching_scores"]
 
-    def train_epoch(self, train_loader):
+    def train_epoch(self, train_loader, max_steps=None):
+        if max_steps is not None and (
+            isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps <= 0
+        ):
+            raise ValueError("max_steps must be a positive integer or None.")
+
         total_loss = 0.0
         retrieval_loss_sum = 0.0
         matching_loss_sum = 0.0
@@ -257,6 +262,8 @@ class Trainer:
         total_samples = 0
 
         for batch_index, batch in enumerate(train_loader):
+            if max_steps is not None and batch_index >= max_steps:
+                break
             images, captions = self._prepare_batch(batch)
 
             batch_size = int(tf.shape(images)[0].numpy())
@@ -333,6 +340,7 @@ class Trainer:
         if total_samples == 0:
             raise RuntimeError("The training dataset is empty.")
 
+        print(f"Training batches processed: {batch_index + 1}")
         average_loss = total_loss / total_samples
         average_retrieval_loss = retrieval_loss_sum / total_samples
         average_matching_loss = (
@@ -503,7 +511,10 @@ class Trainer:
                     self.scheduler.on_epoch_begin(epoch)
 
                 epoch_learning_rate = self._get_learning_rate()
-                train_loss = self.train_epoch(train_loader)
+                train_loss = self.train_epoch(
+                    train_loader,
+                    max_steps=self.config.max_train_steps_per_epoch,
+                )
 
                 self.current_epoch = epoch + 1
                 val_loss = None
@@ -511,7 +522,10 @@ class Trainer:
                 val_total_loss = None
 
                 if evaluator is not None:
-                    validation_results = evaluator.evaluate(val_loader)
+                    validation_results = evaluator.evaluate(
+                        val_loader,
+                        max_batches=self.config.max_validation_steps,
+                    )
                     # val_loss is retrieval-only and is the shared
                     # model-selection metric across all architectures.
                     val_loss = float(validation_results["val_retrieval_loss"])
