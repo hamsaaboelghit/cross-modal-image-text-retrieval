@@ -573,8 +573,26 @@ The backend supports environment variables for selecting the model and checkpoin
 | `VISIONMATCH_CHECKPOINT_DIR` | `checkpoints/experiments/baseline_fold1_seed42` |
 | `VISIONMATCH_CHECKPOINT_KIND` | `best` |
 | `VISIONMATCH_VOCAB_PATH` | `data/processed/flickr30k/vocabularies/fold_1_vocab.json` |
+| `VISIONMATCH_GALLERY_PATH` | `results/retrieval_gallery_fold1/gallery.npz` |
+| `VISIONMATCH_IMAGE_DIR` | `data/raw/flickr30k-images` |
+| `VISIONMATCH_MAX_UPLOAD_BYTES` | `10485760` (10 MiB) |
+| `VISIONMATCH_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` |
 
-The selected checkpoint and gallery must use compatible model configurations.
+Copy `.env.example` to `.env` and configure paths for your local artifacts. The selected checkpoint, vocabulary, and gallery must use compatible model configurations. These artifacts are intentionally excluded from source control.
+
+### 4. Start the Website
+
+Configure `app/web/.env.local` using `app/web/.env.local.example`, then run:
+
+```bash
+cd app/web
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The website calls the configured FastAPI base URL and displays retrieval results returned by the API. The model-insights page reads saved metrics from `GET /metrics`; it shows an unavailable state when no evaluation summary exists.
+
+For backend endpoint details, request/response formats, and deployment configuration, see [app/backend/README.md](app/backend/README.md).
 
 ---
 
