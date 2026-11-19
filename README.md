@@ -535,52 +535,39 @@ Build the gallery after preparing the dataset and loading a compatible trained c
 
 ## Running the Project
 
-### 1. Generate the Retrieval Gallery
+### 1. Configure the Model
 
-From the project root:
+Copy the environment template and edit it to point to the trained checkpoint and matching vocabulary:
+
+```bash
+cp .env.example .env
+```
+
+Set `VISIONMATCH_MODEL_TYPE`, `VISIONMATCH_CHECKPOINT_DIR`, and the data paths in `.env`. Checkpoints, datasets, and generated galleries remain local and are not committed to GitHub.
+
+### 2. Generate the Retrieval Gallery
+
+After configuring `.env` and preparing the dataset:
 
 ```bash
 python -m src.retrieval.build_gallery
 ```
 
-### 2. Start the Backend
+The gallery is generated from the configured model and development split. It must match the selected checkpoint and vocabulary.
+
+### 3. Start the Backend
 
 ```bash
 python -m uvicorn app.backend.main:app --reload --env-file .env
 ```
 
-The backend starts at:
+The backend starts at `http://127.0.0.1:8000`.
 
-```text
-http://127.0.0.1:8000
-```
+### 4. Open API Documentation
 
-### 3. Open API Documentation
+Swagger UI: `http://127.0.0.1:8000/docs`.
 
-```text
-http://127.0.0.1:8000/docs
-```
-
-Use the interactive API interface to test text and image retrieval.
-
-### Model Configuration
-
-The backend supports environment variables for selecting the model and checkpoint paths. Checkpoints and galleries are generated locally and are not committed to GitHub:
-
-| Variable | Default |
-|---|---|
-| `VISIONMATCH_MODEL_TYPE` | `baseline` |
-| `VISIONMATCH_CHECKPOINT_DIR` | `checkpoints/experiments/baseline_fold1_seed42` |
-| `VISIONMATCH_CHECKPOINT_KIND` | `best` |
-| `VISIONMATCH_VOCAB_PATH` | `data/processed/flickr30k/vocabularies/fold_1_vocab.json` |
-| `VISIONMATCH_GALLERY_PATH` | `results/retrieval_gallery_fold1/gallery.npz` |
-| `VISIONMATCH_IMAGE_DIR` | `data/raw/flickr30k-images` |
-| `VISIONMATCH_MAX_UPLOAD_BYTES` | `10485760` (10 MiB) |
-| `VISIONMATCH_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` |
-
-Copy `.env.example` to `.env` and configure paths for your local artifacts. The selected checkpoint, vocabulary, and gallery must use compatible model configurations. These artifacts are intentionally excluded from source control.
-
-### 4. Start the Website
+### 5. Start the Website
 
 Configure `app/web/.env.local` using `app/web/.env.local.example`, then run:
 
@@ -590,7 +577,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3000`. The website calls the configured FastAPI base URL and displays retrieval results returned by the API. The model-insights page reads saved metrics from `GET /metrics`; it shows an unavailable state when no evaluation summary exists.
+Open `http://localhost:3000`. The website calls the configured FastAPI base URL and displays actual retrieval results. The model-insights page reads saved metrics from `GET /metrics` and shows an unavailable state when no evaluation summary exists.
 
 For backend endpoint details, request/response formats, and deployment configuration, see [app/backend/README.md](app/backend/README.md).
 
