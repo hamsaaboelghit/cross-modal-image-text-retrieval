@@ -6,6 +6,7 @@ from src.training.run_hyperparameter_experiments import (
     REFERENCE,
     build_experiments,
     build_run_metadata,
+    build_result_row,
     validate_experiment_design,
     validate_resume_metadata,
 )
@@ -55,6 +56,34 @@ class HyperparameterExperimentDesignTests(unittest.TestCase):
         self.assertEqual(metadata["selection_split"], "validation")
         self.assertEqual(metadata["epochs"], 5)
         self.assertEqual(len(metadata["experiments"]), 10)
+
+    def test_result_row_records_requested_epoch_count(self):
+        experiment = build_experiments()[0]
+        history = {
+            "train_loss": [1.2, 0.9, 0.7],
+            "train_retrieval_loss": [1.2, 0.9, 0.7],
+            "val_retrieval_loss": [1.1, 0.8, 0.85],
+        }
+        metrics = {
+            "overall_mean_recall": 0.42,
+            "overall_mrr": 0.31,
+            "evaluation_split": "validation",
+            "test_set_used": False,
+            "best_val_retrieval_loss": 0.8,
+            "checkpoint_path": "checkpoints/mock",
+        }
+
+        row = build_result_row(
+            experiment=experiment,
+            history=history,
+            metrics=metrics,
+            duration=1.5,
+            epochs_requested=12,
+        )
+
+        self.assertEqual(row["epochs_requested"], 12)
+        self.assertEqual(row["epochs_completed"], 3)
+        self.assertEqual(row["best_epoch"], 2)
 
     def test_resume_rejects_different_run_settings(self):
         expected = build_run_metadata(build_experiments(), epochs=5)

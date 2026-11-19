@@ -396,7 +396,7 @@ def get_best_training_losses(history):
     }
 
 
-def build_result_row(experiment, history, metrics, duration):
+def build_result_row(experiment, history, metrics, duration, epochs_requested):
     row = {
         "experiment": experiment["name"],
         "status": "completed",
@@ -414,7 +414,7 @@ def build_result_row(experiment, history, metrics, duration):
         "optimizer": "AdamW",
         "weight_decay": 1e-4,
         "scheduler": "none",
-        "epochs_requested": 5,
+        "epochs_requested": epochs_requested,
         "early_stopping_patience": 3,
         "training_time_minutes": duration,
 
@@ -556,16 +556,7 @@ def save_best_configuration(rows):
 
     path = OUTPUT_DIR / "best_hyperparameter_configuration.json"
 
-    with path.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            report,
-            file,
-            indent=4,
-            ensure_ascii=False,
-        )
+    atomic_write_json(path, report)
 
     print("\n" + "=" * 70)
     print("BEST HYPERPARAMETER CONFIGURATION")
@@ -782,6 +773,7 @@ def run_all(experiments, epochs=5, resume=False, overwrite=False):
                 history=history,
                 metrics=metrics,
                 duration=duration,
+                epochs_requested=epochs,
             )
 
             rows.append(row)
