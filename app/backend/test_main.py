@@ -366,3 +366,76 @@ def test_metrics_endpoint_reports_missing_results(client, tmp_path, monkeypatch)
     response = client.get("/metrics")
     assert response.status_code == 200
     assert response.json()["available"] is False
+
+
+def test_api_to_retrieval_engine_integration(tmp_path, monkeypatch):
+    import json
+    import numpy as np
+    import tensorflow as tf
+    from app.backend import retrieval_service as retrieval_module
+
+    class TinyModelService:
+        def __init__(self):
+            self.model_type = "baseline"
+            self.is_loaded = True
+            self.checkpoint_info = {"checkpoint_kind": "best"}
+
+        def load(self):
+            return self
+
+        def get_text_embedding(self, query):
+            return tf.constant([[1.0] + [0.0] * 511], dtype=tf.float32)
+
+        def get_image_embedding(self, image):
+            return tf.constant([[1.0] + [0.0] * 511], dtype=tf.float32)
+
+    image_embeddings = np.zeros((2, 512), dtype=np.float32)
+    image_embeddings[0, 0] = 1.0
+    image_embeddings[1, 1] = 1.0
+    text_embeddings = np.zeros((2, 5, 512), dtype=np.float32)
+    text_embeddings[0, :, 0] = 1.0
+    text_embeddings[1, :, 1] = 1.0
+    captions = [
+        [f"Matching caption {index}" for index in range(5)],
+        [f"Other caption {index}" for index in range(5)],
+    ]
+    gallery_path = tmp_path / "gallery.npz"
+    np.savez_compressed(
+        gallery_path,
+        image_embeddings=image_embeddings,
+        text_embeddings=text_embeddings,
+        image_names=np.asarray(["match.jpg", "other.jpg"]),
+        captions_json=np.asarray(json.dumps(captions)),
+        metadata_json=np.asarray(json.dumps({
+            "fold": 1,
+            "model_type": "baseline",
+            "embedding_dim": 512,
+            "test_set_used": False,
+        })),
+    )
+    monkeypatch.setattr(retrieval_module, "GALLERY_PATH", gallery_path)
+    monkeypatch.setattr(retrieval_module, "ModelService", TinyModelService)
+    real_service = retrieval_module.RetrievalService()
+    monkeypatch.setattr(main, "retrieval_service", real_service)
+
+    with TestClient(main.app) as test_client:
+        text_response = test_client.post(
+            "/search/text",
+            json={"query": "A matching scene", "top_k": 2},
+        )
+        assert text_response.status_code == 200
+        text_payload = text_response.json()
+        assert text_payload["results"][0]["image_id"] == "match.jpg"
+        assert text_payload["results"][0]["rank"] == 1
+
+        image = Image.new("RGB", (12, 12), color="red")
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        image_response = test_client.post(
+            "/search/image",
+            files={"file": ("query.png", buffer.getvalue(), "image/png")},
+        )
+        assert image_response.status_code == 200
+        image_payload = image_response.json()
+        assert image_payload["results"][0]["caption"] == "Matching caption 0"
+        assert image_payload["results"][0]["rank"] == 1
