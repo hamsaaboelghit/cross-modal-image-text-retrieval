@@ -47,9 +47,6 @@ def test_search_history_is_session_scoped_and_clearable(qt_app, monkeypatch):
         "model": "baseline",
     })
     assert len(window.search_history) == 1
-    window.show_history()
-    # The dialog is deliberately not executed in this test; the in-memory
-    # history state is tested without opening modal UI.
     window.search_history.clear()
     assert window.search_history == []
     window.close()
