@@ -50,11 +50,11 @@ API address:
 - Physical Android phone: use the computer's LAN IPv4 address, for example `http://192.168.1.10:8000`. The phone and computer must be on the same network.
 - Production: use the deployed HTTPS API URL.
 
-The API URL can be edited in the app's backend connection field. For local HTTP development, ensure Android's generated application manifest permits cleartext traffic, or preferably use HTTPS. Do not expose an unauthenticated development API directly to the public internet.
+The API URL can be edited in the app's Backend API address field. For local HTTP development, edit the generated `android/app/src/main/AndroidManifest.xml` and add `<uses-permission android:name="android.permission.INTERNET" />` directly under the `<manifest>` element. Set `android:usesCleartextTraffic="true"` on the `<application>` element for local HTTP only. Prefer HTTPS and disable cleartext traffic for production. Do not expose an unauthenticated development API directly to the public internet.
 
 ## Run on iOS
 
-Generate the iOS runner on macOS, configure the API URL to the backend's reachable LAN or HTTPS address, then run:
+Generate the iOS runner on macOS. In `ios/Runner/Info.plist`, add an `NSPhotoLibraryUsageDescription` string explaining that the app uses photo-library access to select an image for retrieval. Configure the API URL to the backend's reachable LAN or HTTPS address, then run:
 
 ```bash
 flutter run
