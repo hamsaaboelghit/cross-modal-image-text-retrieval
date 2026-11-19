@@ -1,5 +1,6 @@
 
 from pathlib import Path
+import base64
 import json
 import mimetypes
 import os
@@ -97,6 +98,24 @@ class RetrievalWorker(QThread):
 
             with urllib.request.urlopen(request, timeout=90) as response:
                 payload = json.loads(response.read().decode("utf-8"))
+
+            # Download Text-to-Image thumbnails in this worker thread so
+            # network and image decoding never block the Qt event loop.
+            if self.mode == "text":
+                for item in payload.get("results", [])[:self.top_k]:
+                    image_url = item.get("image_url")
+                    if not image_url:
+                        continue
+                    try:
+                        asset_url = urllib.parse.urljoin(
+                            self.api_base + "/", image_url.lstrip("/")
+                        )
+                        with urllib.request.urlopen(asset_url, timeout=15) as asset:
+                            item["_preview_b64"] = base64.b64encode(
+                                asset.read()
+                            ).decode("ascii")
+                    except (urllib.error.URLError, TimeoutError, OSError):
+                        item["_preview_b64"] = None
             self.succeeded.emit(payload)
         except urllib.error.HTTPError as error:
             try:
@@ -1055,11 +1074,34 @@ class MainWindow(QMainWindow):
             if isinstance(value, dict):
                 value = value.get("caption") or value.get("image_id") or json.dumps(value, ensure_ascii=False)
             score = item.get("similarity", item.get("score", 0.0))
-            label = QLabel(f"#{item.get('rank', '?')}  [{kind}]  {str(value)}\nSimilarity: {float(score):.4f}")
+            card = QFrame()
+            card.setStyleSheet("QFrame { background: white; border: 1px solid #E8EAF1; border-radius: 9px; }")
+            card_layout = QHBoxLayout(card)
+            preview = QLabel()
+            preview.setFixedSize(112, 86)
+            preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            preview.setStyleSheet("background: #F3F4F9; border-radius: 7px; color: #85899A;")
+            preview_data = item.get("_preview_b64")
+            pixmap = QPixmap()
+            if preview_data and pixmap.loadFromData(base64.b64decode(preview_data)):
+                preview.setPixmap(pixmap.scaled(
+                    preview.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
+            else:
+                preview.setText("Image" if kind == "image" else "Caption")
+            details = QVBoxLayout()
+            label = QLabel(f"#{item.get('rank', '?')}  [{kind}]  {str(value)}")
             label.setWordWrap(True)
             label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            label.setStyleSheet("background: #F8F8FC; border: 1px solid #E8EAF1; border-radius: 8px; padding: 9px; font-size: 11px;")
-            self.results_layout.addWidget(label)
+            label.setStyleSheet("border: none; font-size: 11px;")
+            score_label = QLabel(f"Similarity: {float(score):.4f}")
+            score_label.setStyleSheet("border: none; color: #85899A; font-size: 10px;")
+            details.addWidget(label)
+            details.addWidget(score_label)
+            card_layout.addWidget(preview)
+            card_layout.addLayout(details, 1)
+            self.results_layout.addWidget(card)
         if not results:
             self.clear_results("No matching results were returned. Try a different query or image.")
 
