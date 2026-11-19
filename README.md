@@ -361,9 +361,12 @@ The backend integrates:
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/` | Root endpoint |
-| GET | `/health` | Backend health check |
+| GET | `/health` | API and inference readiness |
+| GET | `/models` | Configured model and loading status |
 | POST | `/search/text` | Text-to-Image retrieval |
 | POST | `/search/image` | Image-to-Text retrieval |
+| GET | `/images/{image_name}` | Retrieve a gallery image asset |
+| GET | `/metrics` | Read saved evaluation metrics when available |
 
 ### Text Search Example
 
@@ -397,6 +400,14 @@ Parameters:
 
 - `file`: Image file.
 - `top_k`: Number of captions to retrieve (default: 5, maximum: 50).
+
+### Configuration and Model Selection
+
+Configure the checkpoint, vocabulary, gallery, image directory, CORS origins, and upload limit using environment variables. See the root `.env.example` and [Backend Deployment Guide](app/backend/README.md).
+
+A running API process serves one configured model. The optional `model` request field validates that selection; it does not hot-swap models. Multiple architectures can be exposed through separate API processes with matching checkpoints and galleries.
+
+The `/metrics` endpoint reads a saved evaluation summary file configured through `VISIONMATCH_METRICS_PATH`. It returns an explicit unavailable response when no final metrics file exists; the frontend does not fabricate comparison scores.
 
 ### API Documentation
 
