@@ -20,6 +20,7 @@ The project explores different neural network architectures, attention mechanism
 - [Evaluation](#evaluation)
 - [Retrieval System](#retrieval-system)
 - [FastAPI Backend](#fastapi-backend)
+- [Desktop Application](#desktop-application)
 - [Installation](#installation)
 - [Dataset Setup](#dataset-setup)
 - [Running the Project](#running-the-project)
@@ -341,6 +342,26 @@ python -m src.retrieval.build_gallery
 ```
 
 **Important:** The combined development gallery is intended for deployment retrieval. Do not use it as a validation candidate gallery when evaluating validation queries, because it contains the validation images themselves.
+
+---
+
+## Desktop Application
+
+A PySide6 desktop client is available for both retrieval directions. It connects to the same FastAPI inference service as the website.
+
+Install the optional desktop dependencies:
+
+```bash
+python -m pip install -r requirements-desktop.txt
+```
+
+Start the backend as described below, then launch the desktop app from the repository root:
+
+```bash
+python app/desktop/main.py
+```
+
+The desktop client supports text-to-image search, image-to-text search, JPEG/PNG/WEBP uploads, and Top-K values of 5, 10, 20, or 50. See [Desktop Setup Guide](app/desktop/README.md).
 
 ---
 
