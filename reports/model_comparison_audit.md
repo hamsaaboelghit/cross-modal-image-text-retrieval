@@ -142,7 +142,7 @@ The Baseline and full models use different image architectures and potentially d
 
 The repository contains five experiment configurations covering a Baseline, three sequence-model alternatives, and an additional Cross-Modal Attention model.
 
-The training scripts share several important settings, but the comparison is not perfectly controlled because of differences in image encoders, dropout, and the additional matching objective.
+The training scripts now share the selected dropout rate and retrieval-only validation model-selection criterion. The comparison still contains documented differences in image encoders and training objectives, and it is not complete until preprocessing parity, experiment logs, checkpoints, and validation retrieval metrics have been verified.
 
 The next step is to verify the actual experiment outputs, logs, and checkpoints before claiming that all five models have been trained and compared.
 
