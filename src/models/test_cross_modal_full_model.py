@@ -1,4 +1,3 @@
-
 import pytest
 import tensorflow as tf
 
@@ -30,7 +29,7 @@ def sample_inputs():
     return images, tf.convert_to_tensor(caption_array)
 
 
-def create_advanced_model():
+def create_advanced_model(output_dim=512):
     return CrossModalRetrievalModel(
         vocab_size=1000,
         encoder_type="gru",
@@ -41,6 +40,7 @@ def create_advanced_model():
         use_attention=True,
         pretrained=False,
         use_cross_modal_attention=True,
+        output_dim=output_dim,
     )
 
 
@@ -65,6 +65,20 @@ def test_cross_modal_output_shapes(sample_inputs):
     ) == (2, 3, 12, 49)
 
     assert bool(outputs["matching_negatives_valid"].numpy())
+
+
+def test_custom_output_dim_is_applied_to_both_modalities(sample_inputs):
+    images, captions = sample_inputs
+    model = create_advanced_model(output_dim=256)
+
+    outputs = model(
+        images,
+        captions,
+        training=False,
+    )
+
+    assert tuple(outputs["image_embeddings"].shape) == (2, 256)
+    assert tuple(outputs["text_embeddings"].shape) == (2, 3, 256)
 
 
 def test_cross_modal_attention_padding_mask(sample_inputs):
