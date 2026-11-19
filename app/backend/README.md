@@ -4,13 +4,27 @@ FastAPI inference service for the cross-modal retrieval model. The API loads a t
 
 ## Run
 
-Install the repository requirements, prepare the dataset vocabulary, trained checkpoint, and matching gallery, then configure the environment variables shown in the repository-level `.env.example`.
+Install the repository requirements and copy the repository-level environment template:
 
-From the repository root:
+```bash
+cp .env.example .env
+```
+
+Edit `.env` to select the trained model and point to its checkpoint, vocabulary, image directory, and gallery location. The selected checkpoint and vocabulary must match.
+
+Build the gallery after configuring the model:
+
+```bash
+python -m src.retrieval.build_gallery
+```
+
+Then start the API from the repository root:
 
 ```bash
 uvicorn app.backend.main:app --env-file .env --host 0.0.0.0 --port 8000
 ```
+
+The model service also loads the project `.env` file when invoked by the gallery-building script.
 
 Interactive API documentation is available at `http://localhost:8000/docs`; the OpenAPI schema is at `/openapi.json`.
 
