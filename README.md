@@ -407,7 +407,17 @@ Start the backend as described below, then launch the desktop app from the repos
 python app/desktop/main.py
 ```
 
-The desktop client supports text-to-image search, image-to-text search, JPEG/PNG/WEBP uploads, and Top-K values of 5, 10, 20, or 50. See [Desktop Setup Guide](app/desktop/README.md).
+The desktop client supports:
+
+- Text-to-Image and Image-to-Text retrieval through the FastAPI service.
+- JPEG, PNG, and WEBP uploads with a 10 MiB upload limit and local image preview.
+- Top-K selection (5, 10, 20, or 50).
+- Non-blocking background search and API health checks.
+- Live API state (ready, degraded, or offline) with manual refresh.
+- Ranked result cards with similarity scores and gallery image previews.
+- Session-only search history with a clear-history action.
+
+Install its optional dependencies separately with `python -m pip install -r requirements-desktop.txt`, then run `python app/desktop/main.py` from the repository root. Search history is held in memory only and is cleared when the application closes. The desktop app is an inference client; model loading and retrieval are handled by the backend. See [Desktop Setup Guide](app/desktop/README.md).
 
 ---
 
