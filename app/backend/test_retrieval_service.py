@@ -209,33 +209,24 @@ def test_gallery_with_wrong_fold_is_rejected(gallery_data):
 
 
 
-def test_gallery_with_mismatched_checkpoint_is_rejected(gallery_data):
+
+def test_gallery_with_mismatched_checkpoint_is_rejected(gallery_data, monkeypatch):
     service = retrieval_module.RetrievalService()
-    service.model_service = FakeModelService()
-    (
-        image_embeddings,
-        text_embeddings,
-        image_names,
-        captions,
-        metadata,
-    ) = service._load_gallery()
+    gallery = service._load_gallery()
+    metadata = dict(gallery[4])
     metadata["checkpoint_fingerprint"] = "different-checkpoint"
+    monkeypatch.setattr(service, "_load_gallery", lambda: (*gallery[:4], metadata))
 
     with pytest.raises(ValueError, match="checkpoint_fingerprint"):
         service.load()
 
 
-def test_gallery_without_fingerprints_is_rejected(gallery_data):
+def test_gallery_without_fingerprints_is_rejected(gallery_data, monkeypatch):
     service = retrieval_module.RetrievalService()
-    service.model_service = FakeModelService()
-    (
-        image_embeddings,
-        text_embeddings,
-        image_names,
-        captions,
-        metadata,
-    ) = service._load_gallery()
+    gallery = service._load_gallery()
+    metadata = dict(gallery[4])
     metadata.pop("vocab_fingerprint")
+    monkeypatch.setattr(service, "_load_gallery", lambda: (*gallery[:4], metadata))
 
     with pytest.raises(ValueError, match="missing model compatibility fingerprints"):
         service.load()
