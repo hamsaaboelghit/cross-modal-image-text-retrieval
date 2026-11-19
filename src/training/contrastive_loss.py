@@ -230,7 +230,9 @@ class MultiPositiveInfoNCELoss(tf.keras.layers.Layer):
         matching_scores=None,
         negative_matching_scores=None,
         matching_negatives_valid=None,
+        training=None,
     ):
+        del training
         retrieval_loss = self._retrieval_loss(
             image_embeddings,
             text_embeddings,

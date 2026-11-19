@@ -69,6 +69,7 @@ class Evaluator:
             self.loss_fn(
                 outputs["image_embeddings"],
                 outputs["text_embeddings"],
+                training=False,
             )
         )
 

@@ -25,6 +25,7 @@ class TripletContrastiveLoss(tf.keras.layers.Layer):
         image_embeddings,
         text_embeddings,
         positive_caption_indices=None,
+        training=None,
     ):
         image_embeddings = tf.convert_to_tensor(image_embeddings)
         text_embeddings = tf.convert_to_tensor(text_embeddings)
@@ -83,12 +84,13 @@ class TripletContrastiveLoss(tf.keras.layers.Layer):
 
         # Select one positive caption for each image.
         if positive_caption_indices is None:
-            positive_caption_indices = tf.random.uniform(
-                shape=(batch_size,),
-                minval=0,
-                maxval=num_captions,
-                dtype=tf.int32,
-            )
+            if training is False:
+                positive_caption_indices = tf.zeros((batch_size,), dtype=tf.int32)
+            else:
+                positive_caption_indices = tf.random.uniform(
+                    shape=(batch_size,), minval=0, maxval=num_captions,
+                    dtype=tf.int32,
+                )
         else:
             positive_caption_indices = tf.convert_to_tensor(
                 positive_caption_indices,
@@ -135,24 +137,19 @@ class TripletContrastiveLoss(tf.keras.layers.Layer):
         )
 
         # Select a negative image guaranteed to be different.
-        offsets = tf.random.uniform(
-            shape=(batch_size,),
-            minval=1,
-            maxval=batch_size,
-            dtype=tf.int32,
-        )
-
-        negative_image_indices = (
-            batch_indices + offsets
-        ) % batch_size
-
-        # Select one caption from each negative image.
-        negative_caption_indices = tf.random.uniform(
-            shape=(batch_size,),
-            minval=0,
-            maxval=num_captions,
-            dtype=tf.int32,
-        )
+        if training is False:
+            negative_image_indices = (batch_indices + 1) % batch_size
+            negative_caption_indices = tf.zeros((batch_size,), dtype=tf.int32)
+        else:
+            offsets = tf.random.uniform(
+                shape=(batch_size,), minval=1, maxval=batch_size,
+                dtype=tf.int32,
+            )
+            negative_image_indices = (batch_indices + offsets) % batch_size
+            negative_caption_indices = tf.random.uniform(
+                shape=(batch_size,), minval=0, maxval=num_captions,
+                dtype=tf.int32,
+            )
 
         negative_indices = tf.stack(
             [

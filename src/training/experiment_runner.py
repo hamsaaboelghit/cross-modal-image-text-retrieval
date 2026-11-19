@@ -11,6 +11,8 @@ from src.data.flickr30k_dataset import Flickr30kDataset
 from src.models.baseline_model import BaselineRetrievalModel
 from src.models.full_model import CrossModalRetrievalModel
 from src.training.contrastive_loss import MultiPositiveInfoNCELoss
+from src.training.margin_loss import MarginBasedContrastiveLoss
+from src.training.triplet_loss import TripletContrastiveLoss
 from src.training.train_config import TrainingConfig
 from src.training.trainer import Trainer
 from src.training.checkpoint_manager import CheckpointManager
@@ -37,6 +39,9 @@ def run_experiment(
     fold=1,
     learning_rate=1e-4,
     temperature=0.07,
+    loss_type="info_nce",
+    margin=None,
+    drop_last=False,
     output_dim=512,
     dropout=None,
     log_dir="runs",
@@ -58,6 +63,13 @@ def run_experiment(
 
     if temperature <= 0:
         raise ValueError("temperature must be positive.")
+
+    if loss_type not in {"info_nce", "margin", "triplet"}:
+        raise ValueError("loss_type must be one of: info_nce, margin, triplet.")
+    if margin is None:
+        margin = 1.0 if loss_type == "margin" else 0.2
+    if margin <= 0 or margin > 2:
+        raise ValueError("margin must be greater than 0 and at most 2.")
 
     if output_dim <= 0:
         raise ValueError("output_dim must be positive.")
@@ -103,12 +115,13 @@ def run_experiment(
         weight_decay=1e-4,
         optimizer="adamw",
         scheduler="none",
-        loss_type="info_nce",
+        loss_type=loss_type,
         temperature=temperature,
+        margin=margin,
         use_amp=False,
         num_workers=0,
         pin_memory=False,
-        drop_last=False,
+        drop_last=drop_last,
         seed=seed,
         fold=fold,
         device="auto",
@@ -131,7 +144,7 @@ def run_experiment(
     val_dataset = val_data.as_dataset(
         batch_size=config.batch_size,
         shuffle=False,
-        drop_remainder=False,
+        drop_remainder=config.drop_last,
         seed=seed,
     )
 
@@ -166,12 +179,17 @@ def run_experiment(
     print(f"Dropout: {dropout}")
     print(f"Learning rate: {learning_rate}")
     print(f"Temperature: {temperature}")
+    print(f"Loss function: {loss_type}")
+    print(f"Loss margin: {margin if loss_type != 'info_nce' else 'N/A'}")
     print(f"Cross-modal attention: {use_cross_modal_attention}")
     print(f"Pretrained ResNet50: {pretrained}")
 
-    loss_fn = MultiPositiveInfoNCELoss(
-        temperature=config.temperature,
-    )
+    if loss_type == "info_nce":
+        loss_fn = MultiPositiveInfoNCELoss(temperature=config.temperature)
+    elif loss_type == "margin":
+        loss_fn = MarginBasedContrastiveLoss(margin=config.margin)
+    else:
+        loss_fn = TripletContrastiveLoss(margin=config.margin)
 
     trainer = Trainer(
         model=model,

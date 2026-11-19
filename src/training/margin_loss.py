@@ -33,8 +33,10 @@ class MarginBasedContrastiveLoss(tf.keras.layers.Layer):
         self,
         image_embeddings,
         text_embeddings,
-        caption_mask=None
+        caption_mask=None,
+        training=None,
     ):
+        del training
         image_embeddings = tf.convert_to_tensor(image_embeddings)
         text_embeddings = tf.convert_to_tensor(text_embeddings)
 

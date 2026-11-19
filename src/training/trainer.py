@@ -153,6 +153,7 @@ class Trainer:
         self,
         outputs,
         negative_matching_scores=None,
+        training=True,
     ):
         if not isinstance(outputs, dict):
             raise TypeError("Model must return a dictionary.")
@@ -166,6 +167,7 @@ class Trainer:
             self.loss_fn(
                 outputs["image_embeddings"],
                 outputs["text_embeddings"],
+                training=training,
             )
         )
         if retrieval_loss.shape.rank != 0:
@@ -281,6 +283,7 @@ class Trainer:
                     loss_components = self._compute_loss_components(
                         outputs,
                         negative_matching_scores=negative_scores,
+                        training=True,
                     )
                     loss = loss_components["total_loss"]
                     retrieval_loss = loss_components["retrieval_loss"]
