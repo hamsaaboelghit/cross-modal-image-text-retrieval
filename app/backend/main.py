@@ -88,6 +88,29 @@ app.add_middleware(
 )
 
 
+class RetrievalResult(BaseModel):
+    type: str
+    score: float
+    index: int
+    result: Any
+    rank: int
+    similarity: float
+    image_id: str | None = None
+    image_url: str | None = None
+    caption: str | None = None
+
+
+class SearchResponse(BaseModel):
+    mode: str
+    model: str
+    top_k: int
+    count: int
+    elapsed_ms: float
+    results: list[RetrievalResult]
+    query: str | None = None
+    filename: str | None = None
+
+
 class TextSearchRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
     query: str = Field(
@@ -184,7 +207,7 @@ def list_models():
     }
 
 
-@app.post("/search/text", tags=["Retrieval"], summary="Retrieve images from a text query")
+@app.post("/search/text", tags=["Retrieval"], summary="Retrieve images from a text query", response_model=SearchResponse)
 def search_by_text(request: TextSearchRequest):
     _require_service(request.model)
     started = time.perf_counter()
@@ -207,7 +230,7 @@ def search_by_text(request: TextSearchRequest):
         raise HTTPException(status_code=500, detail="Text retrieval failed.") from exc
 
 
-@app.post("/search/image", tags=["Retrieval"], summary="Retrieve captions from an uploaded image")
+@app.post("/search/image", tags=["Retrieval"], summary="Retrieve captions from an uploaded image", response_model=SearchResponse)
 async def search_by_image(
     file: UploadFile = File(..., description="PNG, JPEG, or WEBP image; maximum 10 MB by default."),
     top_k: int = Query(default=DEFAULT_TOP_K, ge=1, le=MAX_TOP_K),
