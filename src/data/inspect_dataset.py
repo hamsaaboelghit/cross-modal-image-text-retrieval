@@ -2,6 +2,8 @@
 from pathlib import Path
 from collections import Counter
 
+from src.data.image_files import iter_image_names
+
 # Project paths
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -27,11 +29,13 @@ def inspect_dataset():
         return
 
     # Collect image filenames
-    image_files = {
-        path.name
-        for path in IMAGE_DIR.rglob("*")
-        if path.is_file() and path.suffix.lower() in {".jpg", ".jpeg"}
-    }
+    image_files = set()
+    for index, image_name in enumerate(iter_image_names(IMAGE_DIR), start=1):
+        image_files.add(image_name)
+        if index % 5000 == 0:
+            print(f"Scanned {index:,} image files...", flush=True)
+
+    print(f"Image file scan complete: {len(image_files):,} files.", flush=True)
 
     # Read captions
     captions_per_image = Counter()
