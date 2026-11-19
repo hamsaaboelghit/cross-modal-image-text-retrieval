@@ -1,5 +1,6 @@
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -12,12 +13,14 @@ from src.retrieval.retrieval_engine import RetrievalEngine
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-GALLERY_PATH = (
-    PROJECT_ROOT
-    / "results"
-    / "retrieval_gallery_fold1"
-    / "gallery.npz"
-)
+GALLERY_PATH = Path(
+    os.getenv(
+        "VISIONMATCH_GALLERY_PATH",
+        str(PROJECT_ROOT / "results" / "retrieval_gallery_fold1" / "gallery.npz"),
+    )
+).expanduser()
+if not GALLERY_PATH.is_absolute():
+    GALLERY_PATH = PROJECT_ROOT / GALLERY_PATH
 
 
 class RetrievalService:

@@ -1,6 +1,6 @@
 # VisionMatch AI — Frontend
 
-Phase 8 frontend workspace for the Cross-Modal Image-Text Retrieval project.
+Responsive Next.js interface for the cross-modal image–text retrieval API.
 
 ## Stack
 
@@ -11,33 +11,40 @@ Phase 8 frontend workspace for the Cross-Modal Image-Text Retrieval project.
 
 ## Routes
 
-- `/` — landing page and interactive retrieval input (text-to-image / image-to-text)
-- `/compare` — experiment overview and retrieval-metrics placeholders
-- `/about` — project explanation, model pipeline, and dataset overview
+- `/` — home page, Text-to-Image and Image-to-Text search, upload preview, ranked results.
+- `/compare` — reads saved evaluation summaries from the backend `/metrics` endpoint.
+- `/about` — project explanation, model pipeline, and dataset overview.
 
-## Run locally
+## Configure and run
 
-From this directory:
+Copy `.env.local.example` to `.env.local` in this directory and set the backend URL:
+
+```env
+NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
+```
+
+Install dependencies and run the development server:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the local URL printed by Next.js (normally `http://localhost:3000`).
+Open `http://localhost:3000`.
 
-## Current integration status
+## API integration
 
-This is a frontend-only preview. The search form validates text/image input and presents a clear preview state; it does not call a backend or claim to return retrieval results.
+The frontend calls:
+- `GET /models` to discover the configured model.
+- `POST /search/text` with JSON `{ query, top_k, model }`.
+- `POST /search/image?top_k=...&model=...` with multipart `file`.
+- `GET /metrics` for real saved model-evaluation data.
+- `GET /images/{image_name}` to render gallery image results.
 
-The comparison page intentionally shows empty metric slots. Do not replace them with illustrative scores: populate them only from the project's saved evaluation outputs after training and evaluation have completed.
+Search states include loading, validation and API errors, empty results, result ranking, similarity scores, and elapsed time. Uploaded image previews are local browser object URLs; the file is sent only when the user submits an image search.
 
-Image upload currently accepts image MIME types up to 10 MB and creates a local preview in the browser. No uploaded image is sent to a server.
+The backend process currently serves one configured model. The model selector reflects the model returned by that API process; it does not imply that every architecture has a trained checkpoint available.
 
-## Before backend integration
+## Important
 
-1. Agree on API request/response schemas.
-2. Connect the search action to the inference endpoint.
-3. Render returned image/caption matches and similarity scores.
-4. Connect experiment metrics to the saved evaluation artifacts.
-5. Add loading, empty, and error states for real API responses.
+The frontend requires a running backend with a compatible trained checkpoint, vocabulary, and retrieval gallery. The model comparison page intentionally displays an unavailable state until a real evaluation summary is configured. No demo scores or synthetic retrieval results are presented as real model output.

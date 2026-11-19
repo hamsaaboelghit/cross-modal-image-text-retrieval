@@ -361,9 +361,12 @@ The backend integrates:
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/` | Root endpoint |
-| GET | `/health` | Backend health check |
+| GET | `/health` | API and inference readiness |
+| GET | `/models` | Configured model and loading status |
 | POST | `/search/text` | Text-to-Image retrieval |
 | POST | `/search/image` | Image-to-Text retrieval |
+| GET | `/images/{image_name}` | Retrieve a gallery image asset |
+| GET | `/metrics` | Read saved evaluation metrics when available |
 
 ### Text Search Example
 
@@ -397,6 +400,14 @@ Parameters:
 
 - `file`: Image file.
 - `top_k`: Number of captions to retrieve (default: 5, maximum: 50).
+
+### Configuration and Model Selection
+
+Configure the checkpoint, vocabulary, gallery, image directory, CORS origins, and upload limit using environment variables. See the root `.env.example` and [Backend Deployment Guide](app/backend/README.md).
+
+A running API process serves one configured model. The optional `model` request field validates that selection; it does not hot-swap models. Multiple architectures can be exposed through separate API processes with matching checkpoints and galleries.
+
+The `/metrics` endpoint reads a saved evaluation summary file configured through `VISIONMATCH_METRICS_PATH`. It returns an explicit unavailable response when no final metrics file exists; the frontend does not fabricate comparison scores.
 
 ### API Documentation
 
@@ -535,7 +546,7 @@ python -m src.retrieval.build_gallery
 ### 2. Start the Backend
 
 ```bash
-python -m uvicorn app.backend.main:app --reload
+python -m uvicorn app.backend.main:app --reload --env-file .env
 ```
 
 The backend starts at:
@@ -562,8 +573,26 @@ The backend supports environment variables for selecting the model and checkpoin
 | `VISIONMATCH_CHECKPOINT_DIR` | `checkpoints/experiments/baseline_fold1_seed42` |
 | `VISIONMATCH_CHECKPOINT_KIND` | `best` |
 | `VISIONMATCH_VOCAB_PATH` | `data/processed/flickr30k/vocabularies/fold_1_vocab.json` |
+| `VISIONMATCH_GALLERY_PATH` | `results/retrieval_gallery_fold1/gallery.npz` |
+| `VISIONMATCH_IMAGE_DIR` | `data/raw/flickr30k-images` |
+| `VISIONMATCH_MAX_UPLOAD_BYTES` | `10485760` (10 MiB) |
+| `VISIONMATCH_CORS_ORIGINS` | `http://localhost:3000,http://127.0.0.1:3000` |
 
-The selected checkpoint and gallery must use compatible model configurations.
+Copy `.env.example` to `.env` and configure paths for your local artifacts. The selected checkpoint, vocabulary, and gallery must use compatible model configurations. These artifacts are intentionally excluded from source control.
+
+### 4. Start the Website
+
+Configure `app/web/.env.local` using `app/web/.env.local.example`, then run:
+
+```bash
+cd app/web
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The website calls the configured FastAPI base URL and displays retrieval results returned by the API. The model-insights page reads saved metrics from `GET /metrics`; it shows an unavailable state when no evaluation summary exists.
+
+For backend endpoint details, request/response formats, and deployment configuration, see [app/backend/README.md](app/backend/README.md).
 
 ---
 
@@ -573,10 +602,16 @@ The selected checkpoint and gallery must use compatible model configurations.
 cross-modal-image-text-retrieval/
 │
 ├── app/
-│   └── backend/
-│       ├── main.py
-│       ├── model_service.py
-│       └── retrieval_service.py
+│   ├── backend/
+│   │   ├── main.py
+│   │   ├── model_service.py
+│   │   ├── retrieval_service.py
+│   │   └── README.md
+│   │
+│   └── web/
+│       ├── src/app/
+│       ├── package.json
+│       └── FRONTEND_GUIDE.md
 │
 ├── data/
 │   ├── raw/
