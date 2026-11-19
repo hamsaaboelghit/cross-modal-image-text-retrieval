@@ -182,7 +182,7 @@ def test_image_search_rejects_invalid_file(client):
             "file": (
                 "invalid.txt",
                 b"not an image",
-                "text/plain",
+                "image/png",
             )
         },
     )
