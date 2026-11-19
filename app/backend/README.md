@@ -91,7 +91,7 @@ Both search endpoints return `mode`, `model`, `top_k`, `count`, `elapsed_ms`, an
 
 ## Gallery and checkpoint compatibility
 
-The checkpoint, vocabulary, and gallery must come from the same trained model configuration. The gallery metadata is validated on startup, including its fold, embedding dimension, model type, and exclusion of the held-out test split. The gallery contains embeddings and captions, while the image endpoint serves the original image file from `VISIONMATCH_IMAGE_DIR`.
+The checkpoint, vocabulary, and gallery must come from the same trained model configuration. The gallery metadata is validated on startup, including its fold, embedding dimension, model type, and exclusion of the held-out test split. New galleries also store SHA-256 fingerprints for every checkpoint shard and the vocabulary file; the API rejects missing or mismatched fingerprints so embeddings from a different checkpoint or vocabulary cannot be served accidentally. Older galleries without these fingerprints must be rebuilt after the final model and vocabulary have been selected. The gallery contains embeddings and captions, while the image endpoint serves the original image file from `VISIONMATCH_IMAGE_DIR`.
 
 Do not commit large private/local checkpoints, dataset archives, or generated galleries to source control. Store them in a versioned artifact location and configure their paths per deployment.
 

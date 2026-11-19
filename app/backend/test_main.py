@@ -378,7 +378,11 @@ def test_api_to_retrieval_engine_integration(tmp_path, monkeypatch):
         def __init__(self):
             self.model_type = "baseline"
             self.is_loaded = True
-            self.checkpoint_info = {"checkpoint_kind": "best"}
+            self.checkpoint_info = {
+                "checkpoint_kind": "best",
+                "checkpoint_fingerprint": "checkpoint-hash",
+                "vocab_fingerprint": "vocab-hash",
+            }
 
         def load(self):
             return self
@@ -411,6 +415,9 @@ def test_api_to_retrieval_engine_integration(tmp_path, monkeypatch):
             "model_type": "baseline",
             "embedding_dim": 512,
             "test_set_used": False,
+            "checkpoint_fingerprint": "checkpoint-hash",
+            "vocab_fingerprint": "vocab-hash",
+            "metadata_version": 2,
         })),
     )
     monkeypatch.setattr(retrieval_module, "GALLERY_PATH", gallery_path)

@@ -1,0 +1,3 @@
+# Dependencies for the desktop client only; the inference API runs separately.
+PySide6>=6.6,<7.0
+python-dotenv>=1.0,<2.0

@@ -1,8 +1,19 @@
 
 from pathlib import Path
+import json
+import mimetypes
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
 
-from PySide6.QtCore import Qt, QSize
+from PySide6.QtCore import Qt, QSize, QThread, Signal
 from PySide6.QtGui import QPixmap
+from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(PROJECT_ROOT / ".env")
+
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -16,6 +27,8 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QMessageBox,
     QSizePolicy,
+    QComboBox,
+    QScrollArea,
 )
 
 
@@ -31,6 +44,68 @@ COLORS = {
 }
 
 
+class RetrievalWorker(QThread):
+    succeeded = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, api_base, mode, query="", image_path=None, top_k=5, model="baseline"):
+        super().__init__()
+        self.api_base = api_base.rstrip("/")
+        self.mode = mode
+        self.query = query
+        self.image_path = image_path
+        self.top_k = top_k
+        self.model = model
+
+    def run(self):
+        try:
+            if self.mode == "text":
+                url = f"{self.api_base}/search/text"
+                payload = json.dumps({
+                    "query": self.query,
+                    "top_k": self.top_k,
+                    "model": self.model,
+                }).encode("utf-8")
+                request = urllib.request.Request(
+                    url, data=payload,
+                    headers={"Content-Type": "application/json"}, method="POST",
+                )
+            else:
+                boundary = "----VisionMatchDesktopBoundary"
+                path = Path(self.image_path)
+                mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                if mime not in {"image/jpeg", "image/png", "image/webp"}:
+                    raise ValueError("Choose a JPEG, PNG, or WEBP image.")
+                safe_name = path.name.replace('"', "").replace("\r", "").replace("\n", "")
+                with path.open("rb") as image_file:
+                    image_bytes = image_file.read()
+                parts = [
+                    f"--{boundary}\r\n".encode(),
+                    f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'.encode(),
+                    f"Content-Type: {mime}\r\n\r\n".encode(),
+                    image_bytes,
+                    f"\r\n--{boundary}--\r\n".encode(),
+                ]
+                url = f"{self.api_base}/search/image?{urllib.parse.urlencode({'top_k': self.top_k, 'model': self.model})}"
+                request = urllib.request.Request(
+                    url, data=b"".join(parts),
+                    headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+                    method="POST",
+                )
+
+            with urllib.request.urlopen(request, timeout=90) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            self.succeeded.emit(payload)
+        except urllib.error.HTTPError as error:
+            try:
+                detail = json.loads(error.read().decode("utf-8")).get("detail", str(error))
+            except Exception:
+                detail = str(error)
+            self.failed.emit(str(detail))
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self):
@@ -38,6 +113,9 @@ class MainWindow(QMainWindow):
 
         self.selected_image_path = None
         self.current_mode = "text"
+        self.api_base = os.getenv("VISIONMATCH_API_URL", "http://127.0.0.1:8000").rstrip("/")
+        self.model_type = os.getenv("VISIONMATCH_MODEL_TYPE", "baseline").strip().lower()
+        self.search_worker = None
 
         self.setWindowTitle("VisionMatch AI | Cross-Modal Retrieval")
         self.resize(1440, 900)
@@ -322,7 +400,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(title_layout)
         layout.addStretch()
 
-        status = QLabel("●  Backend not connected")
+        status = QLabel(f"●  API: {self.api_base}")
         status.setStyleSheet("""
             color: #A47728;
             background-color: #FFFAF0;
@@ -513,6 +591,14 @@ class MainWindow(QMainWindow):
             }
         """)
 
+        self.top_k_combo = QComboBox()
+        self.top_k_combo.addItems(["5", "10", "20", "50"])
+        self.top_k_combo.setCurrentText("5")
+        self.top_k_combo.setMinimumHeight(40)
+        self.top_k_combo.setToolTip("Number of retrieval results")
+        bottom_layout.addWidget(QLabel("Top results:"))
+        bottom_layout.addWidget(self.top_k_combo)
+
         self.search_btn.clicked.connect(self.handle_search)
         bottom_layout.addWidget(self.search_btn)
 
@@ -540,7 +626,6 @@ class MainWindow(QMainWindow):
 
         self.results_area = QFrame()
         self.results_area.setMinimumHeight(90)
-        self.results_area.setMaximumHeight(115)
 
         self.results_area.setStyleSheet("""
             QFrame {
@@ -550,7 +635,9 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        results_layout = QVBoxLayout(self.results_area)
+        self.results_layout = QVBoxLayout(self.results_area)
+        self.results_layout.setContentsMargins(14, 12, 14, 12)
+        self.results_layout.setSpacing(8)
 
         results_icon = QLabel("▧")
         results_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -566,7 +653,7 @@ class MainWindow(QMainWindow):
         )
 
         results_hint = QLabel(
-            "Connect the backend to display matching images and captions."
+            "Run a search to display matching images or captions here."
         )
         results_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         results_hint.setWordWrap(True)
@@ -574,11 +661,16 @@ class MainWindow(QMainWindow):
             "color: #9295A5; font-size: 10px;"
         )
 
-        results_layout.addWidget(results_icon)
-        results_layout.addWidget(results_text)
-        results_layout.addWidget(results_hint)
+        self.results_layout.addWidget(results_icon)
+        self.results_layout.addWidget(results_text)
+        self.results_layout.addWidget(results_hint)
 
-        layout.addWidget(self.results_area)
+        self.results_scroll = QScrollArea()
+        self.results_scroll.setWidgetResizable(True)
+        self.results_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.results_scroll.setMaximumHeight(300)
+        self.results_scroll.setWidget(self.results_area)
+        layout.addWidget(self.results_scroll)
 
         return page
 
@@ -807,7 +899,7 @@ class MainWindow(QMainWindow):
             self,
             "Select an Image",
             "",
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp)"
+            "Images (*.png *.jpg *.jpeg *.webp)"
         )
 
         if not file_path:
@@ -882,6 +974,9 @@ class MainWindow(QMainWindow):
                     "Please enter a description before searching."
                 )
                 return
+            if len(query) > 1000:
+                self.show_message("Description must be 1,000 characters or fewer.")
+                return
 
         else:
 
@@ -891,10 +986,62 @@ class MainWindow(QMainWindow):
                 )
                 return
 
-        self.show_message(
-            "Your input is ready! Connect the VisionMatch AI "
-            "backend to start real retrieval."
+        self.search_btn.setEnabled(False)
+        self.search_btn.setText("Searching...")
+        self.message_label.hide()
+        self.clear_results("Searching the retrieval gallery...")
+        self.search_worker = RetrievalWorker(
+            api_base=self.api_base,
+            mode=self.current_mode,
+            query=query if self.current_mode == "text" else "",
+            image_path=self.selected_image_path,
+            top_k=int(self.top_k_combo.currentText()),
+            model=self.model_type,
         )
+        self.search_worker.succeeded.connect(self.on_search_success)
+        self.search_worker.failed.connect(self.on_search_failure)
+        self.search_worker.start()
+
+    def clear_results(self, message):
+        while self.results_layout.count():
+            item = self.results_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        label = QLabel(message)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet("color: #777B8C; padding: 12px; font-size: 12px;")
+        self.results_layout.addWidget(label)
+
+    def on_search_success(self, payload):
+        self.search_btn.setEnabled(True)
+        self.search_btn.setText("⌕  Search  →")
+        results = payload.get("results") or []
+        self.clear_results(
+            f"{len(results)} result(s) · {payload.get('elapsed_ms', 0):.1f} ms · {payload.get('model', self.model_type)}"
+        )
+        for item in results[:int(self.top_k_combo.currentText())]:
+            kind = item.get("type", "result")
+            value = item.get("caption") or item.get("image_id") or item.get("result") or "Matching item"
+            if isinstance(value, dict):
+                value = value.get("caption") or value.get("image_id") or json.dumps(value, ensure_ascii=False)
+            score = item.get("similarity", item.get("score", 0.0))
+            label = QLabel(f"#{item.get('rank', '?')}  [{kind}]  {str(value)}\nSimilarity: {float(score):.4f}")
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            label.setStyleSheet("background: #F8F8FC; border: 1px solid #E8EAF1; border-radius: 8px; padding: 9px; font-size: 11px;")
+            self.results_layout.addWidget(label)
+        if not results:
+            self.clear_results("No matching results were returned. Try a different query or image.")
+
+    def on_search_failure(self, error):
+        self.search_btn.setEnabled(True)
+        self.search_btn.setText("⌕  Search  →")
+        self.show_message(
+            f"Could not complete retrieval. Check that the FastAPI backend is running at {self.api_base}. Details: {error}"
+        )
+        self.clear_results("No results available.")
 
     def show_message(self, message):
 

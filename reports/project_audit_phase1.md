@@ -1,4 +1,6 @@
-# Phase 1 — Project Implementation Audit
+# Phase 1 — Historical Project Implementation Audit
+
+> Historical snapshot only. This report predates the merged Backend/Website integration and later project changes. For the current status, see [Project Completion Audit](project_completion_audit.md).
 
 **Repository:** `hamsaaboelghit/cross-modal-image-text-retrieval`  
 **Branch reviewed:** `main`  

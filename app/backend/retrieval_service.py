@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 import numpy as np
 import tensorflow as tf
 from PIL import Image
@@ -12,6 +13,7 @@ from src.retrieval.retrieval_engine import RetrievalEngine
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
 
 GALLERY_PATH = Path(
     os.getenv(
@@ -156,6 +158,33 @@ class RetrievalService:
                 f"Gallery: {metadata.get('model_type')}, "
                 f"Model: {self.model_service.model_type}."
             )
+
+        expected_artifacts = getattr(
+            self.model_service, "checkpoint_info", {}
+        )
+        required_fingerprints = {
+            "checkpoint_fingerprint": expected_artifacts.get("checkpoint_fingerprint"),
+            "vocab_fingerprint": expected_artifacts.get("vocab_fingerprint"),
+        }
+        missing_fingerprints = [
+            key for key, expected in required_fingerprints.items()
+            if not expected or not metadata.get(key)
+        ]
+        if missing_fingerprints:
+            raise ValueError(
+                "Gallery metadata is missing model compatibility fingerprints "
+                f"({', '.join(missing_fingerprints)}). Rebuild the gallery with "
+                "src/retrieval/build_gallery.py using the configured checkpoint "
+                "and vocabulary."
+            )
+        for key, expected in required_fingerprints.items():
+            actual = metadata.get(key)
+            if actual != expected:
+                raise ValueError(
+                    f"Gallery {key} does not match the loaded model artifacts. "
+                    "Rebuild the gallery with the currently configured checkpoint "
+                    "and vocabulary."
+                )
 
         print("Initializing Retrieval Engine...")
 

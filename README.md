@@ -6,6 +6,8 @@ VisionMatch AI is a deep learning project that learns a shared embedding space f
 
 The project explores different neural network architectures, attention mechanisms, and contrastive learning techniques for bidirectional image–text retrieval.
 
+> **Experimental status (November 2026):** The software pipeline is implemented and its dataset, model, evaluation, training, retrieval, backend, and website checks have been exercised locally. This does **not** mean retrieval quality is satisfactory. Current architecture results are preliminary and uneven; a short Phase 5 pilot reported validation Mean Recall of 0.0007. A controlled, reproducible comparison and final held-out test evaluation are still required. Do not interpret a working search interface or a loaded checkpoint as evidence of accurate retrieval.
+
 ---
 
 ## Table of Contents
@@ -19,7 +21,9 @@ The project explores different neural network architectures, attention mechanism
 - [Training and Loss Functions](#training-and-loss-functions)
 - [Evaluation](#evaluation)
 - [Retrieval System](#retrieval-system)
+- [Website Application](#website-application)
 - [FastAPI Backend](#fastapi-backend)
+- [Desktop Application](#desktop-application)
 - [Installation](#installation)
 - [Dataset Setup](#dataset-setup)
 - [Running the Project](#running-the-project)
@@ -127,6 +131,23 @@ The data pipeline includes the following stages:
   - `BOS`
   - `EOS`
 - Encode captions using a maximum sequence length of 34.
+
+### Dataset integrity checks
+
+Run the lightweight structural checks from the repository root:
+
+```bash
+python -m src.data.inspect_dataset
+python -m src.data.validate_captions
+```
+
+The image scan reports progress every 5,000 files. To decode and verify every JPEG file separately (this can take longer on a Windows-mounted WSL drive), run:
+
+```bash
+python -m src.data.validate_images
+```
+
+These checks validate local files; the dataset itself is not stored in GitHub.
 
 ### TensorFlow Data Pipeline
 
@@ -257,6 +278,14 @@ These values describe the initial baseline experiment configuration. Other exper
 
 The evaluation pipeline measures retrieval quality in both directions.
 
+### Current model-quality status
+
+The committed architecture-comparison report is preliminary: the LSTM results came from an earlier run, the newer GRU/Transformer/Cross-Modal Attention runs used one seed and five epochs, and the simple baseline was not included in that comparison. A later short Phase 5 `data_reference` pilot (one epoch, 50 training steps per epoch, batch size 4) reported validation Mean Recall **0.0007**. This is a diagnostic pilot, not a final benchmark, and it indicates that the current model quality needs investigation before the project can claim successful retrieval performance.
+
+The website and API have also been smoke-tested with a locally loaded Baseline checkpoint and gallery. Both retrieval directions return results, but manual inspection found that relevance is weak. This is a functional integration result only, not an accuracy result.
+
+Next AI work should verify checkpoint-to-gallery compatibility and embedding behavior, establish a reproducible baseline, compare selected encoders under identical data/training/evaluation settings, and repeat the selected configurations across at least three seeds. Keep the held-out test split untouched until all model and hyperparameter choices are finalized.
+
 ### Evaluation Metrics
 
 - **Recall@1:** Percentage of queries whose relevant result appears at rank 1.
@@ -344,6 +373,44 @@ python -m src.retrieval.build_gallery
 
 ---
 
+## Website Application
+
+A Next.js website is available for both retrieval directions. It connects to the FastAPI service and provides text/image query input, model discovery, Top-K selection, ranked results, similarity scores, loading/error states, and model insights from saved evaluation metrics. A minimum-similarity control can filter the displayed results without changing the backend ranking.
+
+Configure the frontend API URL in `app/web/.env.local` (copy `app/web/.env.local.example`) using `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000`, then start it from the web directory:
+
+```bash
+cd app/web
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The backend must be running and healthy for live retrieval.
+
+---
+
+## Desktop Application
+
+A PySide6 desktop client is available for both retrieval directions. It connects to the same FastAPI inference service as the website.
+
+Install the optional desktop dependencies separately from the core training/backend environment:
+
+```bash
+python -m pip install -r requirements-desktop.txt
+```
+
+`requirements-desktop.txt` contains only the PySide6 GUI dependency and `python-dotenv`; the API, TensorFlow, and model dependencies remain in `requirements.txt`.
+
+Start the backend as described below, then launch the desktop app from the repository root:
+
+```bash
+python app/desktop/main.py
+```
+
+The desktop client supports text-to-image search, image-to-text search, JPEG/PNG/WEBP uploads, and Top-K values of 5, 10, 20, or 50. See [Desktop Setup Guide](app/desktop/README.md).
+
+---
+
 ## FastAPI Backend
 
 The project provides a REST API implemented using FastAPI.
@@ -403,7 +470,7 @@ Parameters:
 
 ### Configuration and Model Selection
 
-Configure the checkpoint, vocabulary, gallery, image directory, CORS origins, and upload limit using environment variables. See the root `.env.example` and [Backend Deployment Guide](app/backend/README.md).
+Configure the model type, checkpoint directory/kind, vocabulary, gallery output/input path, image directory, CORS origins, upload limit, query length, Top-K limits, and metrics path using environment variables. Copy the root `.env.example` to `.env` and edit the values for your local artifacts. `VISIONMATCH_GALLERY_PATH` is used by both the gallery builder and API; relative paths are resolved from the repository root. See the root `.env.example` and [Backend Deployment Guide](app/backend/README.md).
 
 A running API process serves one configured model. The optional `model` request field validates that selection; it does not hot-swap models. Multiple architectures can be exposed through separate API processes with matching checkpoints and galleries.
 
@@ -462,8 +529,8 @@ pip install -r requirements.txt
 
 ### Main Dependencies
 
-- Python 3.11–3.12
-- TensorFlow 2.16.2–2.21.0 (see the supported range in requirements.txt; GPU support depends on the OS/WSL CUDA setup)
+- Python 3.11 or 3.12
+- TensorFlow 2.16.2–2.21.x (the exact allowed range is defined in requirements.txt; GPU availability depends on the operating system and CUDA/cuDNN setup)
 - Keras
 - NumPy
 - Pandas
@@ -553,7 +620,7 @@ After configuring `.env` and preparing the dataset:
 python -m src.retrieval.build_gallery
 ```
 
-The gallery is generated from the configured model and development split. It must match the selected checkpoint and vocabulary.
+The gallery is generated from the configured model and development split at `VISIONMATCH_GALLERY_PATH` (default: `results/retrieval_gallery_fold1/gallery.npz`). New gallery metadata includes SHA-256 fingerprints of the checkpoint shards and vocabulary. The API rejects galleries with missing or mismatched fingerprints, so rebuild the gallery whenever the selected checkpoint or vocabulary changes. Build it only after selecting the final trained model; the held-out test split remains excluded.
 
 ### 3. Start the Backend
 
@@ -561,7 +628,7 @@ The gallery is generated from the configured model and development split. It mus
 python -m uvicorn app.backend.main:app --reload --env-file .env
 ```
 
-The backend starts at `http://127.0.0.1:8000`.
+The backend starts at `http://127.0.0.1:8000`. Check `GET /health` before opening the website or desktop client; a healthy API requires a loaded checkpoint and a gallery whose checkpoint/vocabulary fingerprints match.
 
 ### 4. Open API Documentation
 
@@ -589,6 +656,7 @@ For backend endpoint details, request/response formats, and deployment configura
 cross-modal-image-text-retrieval/
 │
 ├── app/
+│   ├── desktop/
 │   ├── backend/
 │   │   ├── main.py
 │   │   ├── model_service.py
@@ -657,21 +725,22 @@ cross-modal-image-text-retrieval/
 
 ## Testing
 
-The repository includes automated tests for data preprocessing, model components, training utilities, retrieval metrics, gallery handling, and FastAPI services.
+The repository includes automated tests for data preprocessing, model components, training utilities, retrieval metrics, gallery handling, FastAPI services, and a separate optional desktop UI smoke test.
 
-Run the test suite from the project root:
-
-```bash
-python -m pytest -v
-```
-
-Backend-focused tests can be run separately:
+Run the focused test groups from the project root:
 
 ```bash
-python -m pytest app/backend/test_main.py app/backend/test_retrieval_service.py -v
+python -m pytest -v src/data/
+python -m pytest -v src/models/
+python -m pytest -v src/evaluation/
+python -m pytest -v src/retrieval/
+python -m pytest -v src/training/
+python -m pytest -v app/backend/
 ```
 
-These tests cover API and service behavior. Tests that use mock model services or synthetic galleries validate software contracts; they do not measure retrieval quality or replace an end-to-end test with a trained checkpoint and real gallery.
+The commands above exercise the automated unit/integration tests without intentionally launching a full training run. Run the desktop tests separately only after installing `requirements-desktop.txt` and the platform's Qt runtime libraries; on headless Linux, use `QT_QPA_PLATFORM=offscreen`.
+
+These tests validate code behavior. Tests that use mock model services, synthetic data, or synthetic galleries do not measure retrieval quality. A separate end-to-end evaluation with a trained checkpoint, matching vocabulary, and real gallery is required.
 
 ---
 

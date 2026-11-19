@@ -1,0 +1,55 @@
+name: Desktop CI
+
+on:
+  pull_request:
+    paths:
+      - "app/desktop/**"
+      - "requirements-desktop.txt"
+      - ".github/workflows/desktop-ci.yml"
+  push:
+    branches:
+      - main
+      - "feature/final-integration-audit"
+    paths:
+      - "app/desktop/**"
+      - "requirements-desktop.txt"
+      - ".github/workflows/desktop-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    name: Desktop UI smoke tests
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 libxcb-cursor0
+
+      - name: Install desktop dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-desktop.txt pytest
+
+      - name: Compile desktop package
+        run: python -m compileall -q app/desktop
+
+      - name: Run desktop UI smoke tests
+        run: python -m pytest app/desktop/test_desktop_ui.py -v

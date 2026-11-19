@@ -13,6 +13,10 @@ class FakeModelService:
     def __init__(self):
         self.model_type = "baseline"
         self.is_loaded = True
+        self.checkpoint_info = {
+            "checkpoint_fingerprint": "checkpoint-hash",
+            "vocab_fingerprint": "vocab-hash",
+        }
 
     def load(self):
         return self
@@ -60,6 +64,9 @@ def gallery_data(tmp_path, monkeypatch):
         "embedding_dim": 512,
         "source": "train + validation",
         "test_set_used": False,
+        "checkpoint_fingerprint": "checkpoint-hash",
+        "vocab_fingerprint": "vocab-hash",
+        "metadata_version": 2,
         "format": "numpy_npz",
     }
 
@@ -199,3 +206,27 @@ def test_gallery_with_wrong_fold_is_rejected(gallery_data):
             captions,
             metadata,
         )
+
+
+
+
+def test_gallery_with_mismatched_checkpoint_is_rejected(gallery_data, monkeypatch):
+    service = retrieval_module.RetrievalService()
+    gallery = service._load_gallery()
+    metadata = dict(gallery[4])
+    metadata["checkpoint_fingerprint"] = "different-checkpoint"
+    monkeypatch.setattr(service, "_load_gallery", lambda: (*gallery[:4], metadata))
+
+    with pytest.raises(ValueError, match="checkpoint_fingerprint"):
+        service.load()
+
+
+def test_gallery_without_fingerprints_is_rejected(gallery_data, monkeypatch):
+    service = retrieval_module.RetrievalService()
+    gallery = service._load_gallery()
+    metadata = dict(gallery[4])
+    metadata.pop("vocab_fingerprint")
+    monkeypatch.setattr(service, "_load_gallery", lambda: (*gallery[:4], metadata))
+
+    with pytest.raises(ValueError, match="missing model compatibility fingerprints"):
+        service.load()

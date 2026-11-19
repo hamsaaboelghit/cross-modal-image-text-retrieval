@@ -1,4 +1,5 @@
 
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -50,12 +51,39 @@ VOCAB_PATH = Path(
             / "fold_1_vocab.json"
         ),
     )
-)
+).expanduser()
+if not VOCAB_PATH.is_absolute():
+    VOCAB_PATH = PROJECT_ROOT / VOCAB_PATH
 
 IMAGE_SIZE = 224
 MAX_LENGTH = 34
 NUM_CAPTIONS = 5
 EMBEDDING_DIM = 512
+
+
+def sha256_file(path):
+    """Hash a file incrementally so large checkpoints do not fill memory."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def checkpoint_fingerprint(checkpoint_prefix):
+    """Fingerprint the index and every data shard of a TensorFlow checkpoint."""
+    prefix = Path(checkpoint_prefix)
+    files = [Path(str(prefix) + ".index")]
+    files.extend(sorted(prefix.parent.glob(prefix.name + ".data-*")))
+    if len(files) < 2 or any(not item.is_file() for item in files):
+        raise FileNotFoundError(
+            f"Cannot fingerprint incomplete TensorFlow checkpoint: {checkpoint_prefix}"
+        )
+    digest = hashlib.sha256()
+    for item in files:
+        digest.update(item.name.encode("utf-8"))
+        digest.update(sha256_file(item).encode("ascii"))
+    return digest.hexdigest()
 
 
 class ModelService:
@@ -341,6 +369,8 @@ class ModelService:
             "model_type": self.model_type,
             "checkpoint_path": checkpoint_path,
             "checkpoint_kind": checkpoint_kind,
+            "checkpoint_fingerprint": checkpoint_fingerprint(checkpoint_path),
+            "vocab_fingerprint": sha256_file(VOCAB_PATH),
             "vocab_size": len(self.vocabulary),
             "embedding_dim": EMBEDDING_DIM,
         }
