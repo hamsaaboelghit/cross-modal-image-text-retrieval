@@ -602,10 +602,16 @@ For backend endpoint details, request/response formats, and deployment configura
 cross-modal-image-text-retrieval/
 │
 ├── app/
-│   └── backend/
-│       ├── main.py
-│       ├── model_service.py
-│       └── retrieval_service.py
+│   ├── backend/
+│   │   ├── main.py
+│   │   ├── model_service.py
+│   │   ├── retrieval_service.py
+│   │   └── README.md
+│   │
+│   └── web/
+│       ├── src/app/
+│       ├── package.json
+│       └── FRONTEND_GUIDE.md
 │
 ├── data/
 │   ├── raw/
