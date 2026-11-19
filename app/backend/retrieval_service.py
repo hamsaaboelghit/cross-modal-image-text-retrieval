@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 import numpy as np
 import tensorflow as tf
 from PIL import Image
@@ -12,6 +13,7 @@ from src.retrieval.retrieval_engine import RetrievalEngine
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
 
 GALLERY_PATH = Path(
     os.getenv(
