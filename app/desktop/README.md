@@ -1,6 +1,6 @@
 # VisionMatch AI Desktop Application
 
-The desktop client is a PySide6 application for the same FastAPI retrieval service used by the website. It is an inference-only client: it does not import TensorFlow, load checkpoints, build galleries, or train models.
+The desktop client is a PySide6 application for the same FastAPI retrieval service used by the website. It is an inference-only client: it does not import TensorFlow, load checkpoints, build galleries, or train models. Install the GUI dependencies separately so the core training environment stays independent of Qt.
 
 ## Install
 
@@ -36,7 +36,7 @@ python app/desktop/main.py
 - Configurable Top-K (5, 10, 20, or 50).
 - Background search and API health requests so the UI remains responsive.
 - API readiness state distinguishing offline, degraded, and model-ready states.
-- Ranked results with similarity scores and result summaries.
+- Ranked result cards with similarity scores, text details, and image thumbnails fetched asynchronously from the gallery.
 - Session-only search history with a clear-history action.
 - About page describing the dataset, model family, and inference architecture.
 - Clear handling of HTTP errors, unavailable services, and malformed responses.
