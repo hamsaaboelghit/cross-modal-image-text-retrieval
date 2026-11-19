@@ -4,9 +4,8 @@ import { useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import {
-  ArrowDownRight, ArrowRight, ArrowUpRight, BrainCircuit, Check,
-  ChevronDown, CircleHelp, Command, Compass, FileImage, Image as ImageIcon,
-  Layers3, Menu, MousePointer2, Search, Sparkles, Upload, X, Zap,
+  ArrowRight, ArrowUpRight, BrainCircuit, Check, Command, Image as ImageIcon,
+  Menu, Search, Sparkles, Upload, X, Zap,
 } from "lucide-react";
 
 type Mode = "text" | "image";
