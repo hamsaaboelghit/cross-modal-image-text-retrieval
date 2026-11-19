@@ -21,3 +21,6 @@ python-multipart>=0.0.9
 # Testing
 pytest>=8.0,<9.0
 httpx>=0.27,<1.0
+
+# Optional desktop GUI dependencies are intentionally isolated from the
+# training/backend environment; install them with requirements-desktop.txt.
