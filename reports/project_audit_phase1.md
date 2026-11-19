@@ -30,7 +30,7 @@ This report distinguishes implementation evidence from completed experimental ev
 | Common dataset split | Partially verified | The experiment runner loads train and validation for the configured fold. Actual split identity across all historical runs needs logs/config artifacts. |
 | Common preprocessing | Needs verification | ResNet50 applies its own preprocessing internally; baseline and full-model image paths require an explicit equivalence review. |
 | Common caption preprocessing | Needs verification | Backend tokenization comments claim parity with training tokenization; tests should verify exact parity. |
-| Shared embedding dimension | Partially implemented | Runner passes `output_dim` to the baseline, but the full-model branch does not pass it and therefore remains at its model default (512). |
+| Shared embedding dimension | Configurable in code | `experiment_runner.py` passes `output_dim` to `CrossModalRetrievalModel`; the model applies it to both image and text projection outputs. A regression test now covers a 256-dimensional output. |
 | Documented loss, batch size, LR, epochs, seed | Partially implemented | Runner configures these values; per-run artifacts and all architecture-specific settings still need validation. |
 | Consistent stopping policy | Partially implemented | Runner configures early stopping; confirm that all architecture scripts use the same policy and that logs record actual epochs. |
 | Named checkpoints | Implemented in configuration | Checkpoint directories are configured per experiment; actual checkpoint files are not part of this repository audit. |
@@ -49,7 +49,7 @@ The existing `reports/model_comparison_audit.md` identifies:
 2. Default dropout differs (0.1 baseline versus 0.2 full models).
 3. Cross-Modal Attention includes an additional matching-loss component.
 4. Model capacity differs and should be reported.
-5. The experiment runner's `output_dim` parameter affects the baseline path but is not passed to the full-model constructor.
+5. The full model exposes `output_dim` (default 512), and the experiment runner passes the selected value to its constructor. Automated coverage for a non-default full-model dimension was missing; a regression test has now been added.
 
 These differences do not automatically invalidate the architecture study, but they must be controlled where possible or explicitly disclosed.
 
@@ -86,7 +86,7 @@ The reviewed `main.py` contains root, health, text-search, and image-search rout
 |---|---|---|
 | P0 | Verify local checkpoints, logs, and dataset availability | Avoid rerunning completed work and avoid claiming unverified results. |
 | P0 | Resolve inference architecture/checkpoint compatibility | A mismatch can prevent the deployed model from restoring or reproducing training behavior. |
-| P1 | Fix and test embedding-dimension propagation | Required for valid embedding-dimension experiments. |
+| P1 | Maintain regression coverage for configurable embedding dimensions | The full-model path already propagates `output_dim`; a 256-dimensional output test has now been added. |
 | P1 | Establish a controlled architecture comparison protocol | Make preprocessing, split, training budget, and evaluation comparable. |
 | P1 | Complete hyperparameter and loss comparisons | Produce real validation metrics and logs. |
 | P2 | Complete data-strategy and pretrained-vs-scratch experiments | Cover remaining research requirements. |
