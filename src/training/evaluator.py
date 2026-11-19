@@ -82,7 +82,14 @@ class Evaluator:
         )
         return loss
 
-    def evaluate(self, val_loader):
+    def evaluate(self, val_loader, max_batches=None):
+        if max_batches is not None and (
+            isinstance(max_batches, bool)
+            or not isinstance(max_batches, int)
+            or max_batches <= 0
+        ):
+            raise ValueError("max_batches must be a positive integer or None.")
+
         retrieval_loss_sum = 0.0
         matching_loss_sum = 0.0
         total_samples = 0
@@ -90,7 +97,9 @@ class Evaluator:
         total_batches = 0
         matching_batches_skipped = 0
 
-        for batch in val_loader:
+        for batch_index, batch in enumerate(val_loader):
+            if max_batches is not None and batch_index >= max_batches:
+                break
             images, captions = self._prepare_batch(batch)
             batch_size = int(tf.shape(images)[0].numpy())
 
