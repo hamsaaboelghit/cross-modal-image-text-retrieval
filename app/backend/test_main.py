@@ -175,6 +175,19 @@ def test_image_search_endpoint(client):
     )
 
 
+
+def test_image_search_endpoint_accepts_bmp(client):
+    image = Image.new("RGB", (16, 16), color="green")
+    buffer = io.BytesIO()
+    image.save(buffer, format="BMP")
+    response = client.post(
+        "/search/image",
+        files={"file": ("test.bmp", buffer.getvalue(), "image/bmp")},
+    )
+    assert response.status_code == 200
+    assert response.json()["mode"] == "image_to_text"
+
+
 def test_image_search_rejects_invalid_file(client):
     response = client.post(
         "/search/image",
