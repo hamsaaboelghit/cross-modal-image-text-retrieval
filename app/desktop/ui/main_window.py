@@ -75,7 +75,7 @@ class RetrievalWorker(QThread):
                 mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
                 if mime not in {"image/jpeg", "image/png", "image/webp"}:
                     raise ValueError("Choose a JPEG, PNG, or WEBP image.")
-                safe_name = path.name.replace('"', "").replace("\\r", "").replace("\\n", "")
+                safe_name = path.name.replace('"', "").replace("\r", "").replace("\n", "")
                 with path.open("rb") as image_file:
                     image_bytes = image_file.read()
                 parts = [
