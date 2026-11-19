@@ -636,156 +636,45 @@ cross-modal-image-text-retrieval/
 
 ## Testing
 
-The project includes automated tests covering:
+The repository includes automated tests for data preprocessing, model components, training utilities, retrieval metrics, gallery handling, and FastAPI services.
 
-- Dataset integrity and preprocessing.
-- TensorFlow data pipelines.
-- Baseline and advanced model architectures.
-- RNN, LSTM, GRU, and Transformer encoders.
-- Attention mechanisms.
-- Gradient flow.
-- Contrastive and matching loss integration.
-- Retrieval metrics and ranking.
-- Gallery and retrieval services.
-- FastAPI endpoints.
-- Package imports and training integration.
-
-Run the complete test suite from the project root:
+Run the test suite from the project root:
 
 ```bash
 python -m pytest -v
 ```
 
-### Latest Local Test Result
-
-```text
-103 passed
-0 failed
-0 errors
-```
-
-The full test suite completed successfully in the local development environment on November 18, 2026.
-
----
-
-## Current Implementation Status
-
-This section distinguishes implemented code from functionality that has been verified with real trained artifacts. A passing unit test does not by itself prove production or end-to-end readiness.
-
-### Implemented in the Repository
-
-- Flickr30k data preparation, image/caption preprocessing, vocabulary construction, and fold-based data loading.
-- CNN baseline and ResNet50-based image encoder.
-- RNN, LSTM, GRU, and Transformer text encoders.
-- Additive Attention and Cross-Modal Attention components.
-- Contrastive loss implementations: Multi-Positive InfoNCE, margin contrastive, and triplet loss.
-- Training infrastructure: configuration, optimizer, checkpoint management, early stopping, logging, and experiment runners.
-- Retrieval evaluation code and ranking metrics.
-- Retrieval gallery builder and bidirectional retrieval engine.
-- FastAPI application with startup lifespan and service separation:
-  - `app/backend/main.py`
-  - `app/backend/model_service.py`
-  - `app/backend/retrieval_service.py`
-- Model/checkpoint loading was smoke-tested locally with an LSTM checkpoint. Exact parity between the training configuration and serving configuration still needs to be verified before treating that checkpoint as the final deployment model.
-- Targeted Backend tests: **20 passed** in the local test run. These tests use fake model/retrieval services and temporary gallery data for API/service behavior; they are not a full real-checkpoint + production-gallery end-to-end test.
-
-### Training and Evaluation Status
-
-- The training and experiment code is present, but the planned architecture/loss/hyperparameter comparisons have not all completed.
-- A short Phase 5 pilot completed, but its validation Mean Recall was `0.0007`; this is a warning signal that requires metric/pipeline investigation and further training, not a final performance result.
-- Full LSTM, GRU, Transformer, Baseline, loss-comparison, and hyperparameter runs were interrupted by an out-of-memory (OOM) event in WSL. The WSL kernel log confirmed that the Linux OOM killer terminated a Python process.
-- TensorFlow detected the RTX 4050 in some runs but failed to register the GPU in other runs. GPU initialization and memory-efficient data loading must be stabilized before full comparisons.
-- The held-out test split remains excluded from training and model selection. Final test evaluation should happen only after model selection is complete.
-
-### Person 3 — Backend & Website Delivery Checklist
-
-The Backend core exists, but the complete Person 3 handoff is **not yet finished**. The checklist below reflects the current implementation evidence.
-
-#### Backend Architecture
-
-- [x] FastAPI application and API route structure.
-- [x] Separate Model Service and Retrieval Service modules.
-- [x] Model and vocabulary loading code.
-- [x] Checkpoint restoration code.
-- [x] Text tokenization and text embedding extraction code.
-- [x] Image decoding/preprocessing and image embedding extraction code.
-- [x] Retrieval Engine integration and ranked result formatting.
-- [x] Application startup loading through FastAPI lifespan (the service is loaded at startup, not trained per request).
-- [x] Environment-based model type and checkpoint selection.
-- [ ] Verify exact training/serving architecture and preprocessing parity for the selected final checkpoint.
-- [ ] Make the gallery path configurable and document a portable checkpoint/gallery release procedure.
-- [ ] Add explicit, deployment-tested CPU/GPU device configuration and startup diagnostics.
-- [ ] Add structured application logging and consistent handling for unexpected server errors.
-
-#### API Endpoints and Validation
-
-| Endpoint | Current status |
-|---|---|
-| `GET /` | [x] Implemented |
-| `GET /health` | [x] Implemented |
-| `POST /search/text` | [x] Implemented |
-| `POST /search/image` | [x] Implemented |
-| `GET /models` | [ ] Not implemented |
-| `POST /search/image-to-image` | [ ] Optional; not implemented |
-| `POST /search/text-to-text` | [ ] Optional; not implemented |
-
-- [x] Text query validation (non-empty, maximum 1,000 characters).
-- [x] Top-K validation (1–50).
-- [x] Invalid/unreadable image rejection.
-- [x] Service-unavailable response when the retrieval service is not loaded.
-- [ ] Explicit upload byte-size limit and strict content-type allowlist.
-- [ ] Dedicated tests for missing real checkpoint/gallery, oversized uploads, unsupported MIME types, unexpected exceptions, and repeated real-model requests.
-- [x] FastAPI Swagger/OpenAPI documentation is generated automatically at `/docs`.
-
-#### Backend Testing
-
-- [x] Health endpoint test.
-- [x] Text search API tests.
-- [x] Image search API tests.
-- [x] Empty/overlong text and invalid top-K tests.
-- [x] Invalid image and unavailable-service tests.
-- [x] Retrieval service tests using a temporary synthetic gallery and a fake model service.
-- [ ] Real integration test using the selected trained checkpoint and the actual generated gallery.
-- [ ] Repeated-request/load test to check memory growth and service stability.
-- [ ] Complete failure-path coverage for missing model artifacts, wrong content type, and oversized files.
-
-Latest targeted Backend test command:
+Backend-focused tests can be run separately:
 
 ```bash
 python -m pytest app/backend/test_main.py app/backend/test_retrieval_service.py -v
 ```
 
-Latest reported result: **20 passed**. These tests validate the API and service contracts with test doubles; they do not certify real-model retrieval quality.
+These tests cover API and service behavior. Tests that use mock model services or synthetic galleries validate software contracts; they do not measure retrieval quality or replace an end-to-end test with a trained checkpoint and real gallery.
 
-#### Website
+---
 
-No complete, verified frontend implementation or live Website-to-Backend integration has been confirmed in the current project state. Therefore these tasks remain open:
+## System Workflow
 
-- [ ] Website Home Page with VisionMatch AI identity and project introduction.
-- [ ] Text-to-Image search interface.
-- [ ] Image-to-Text upload interface with preview.
-- [ ] Ranked results with similarity score, rank, and image/caption identifiers.
-- [ ] Loading, empty, error, and clear states.
-- [ ] Responsive layout and pagination/load-more behavior where needed.
-- [ ] Model Comparison page populated from saved experiment results (not hard-coded values).
-- [ ] Website connected to the real FastAPI endpoints.
-- [ ] End-to-end browser test for both retrieval directions.
+VisionMatch AI follows a modular image–text retrieval pipeline:
 
-#### Person 3 Completion Criteria
+1. **Dataset preparation:** Flickr30k images and captions are cleaned, split at image level, and converted into model-ready tensors and token IDs.
+2. **Feature extraction:** The image encoder extracts visual features, while the selected text encoder processes caption tokens and captures their sequential or contextual information.
+3. **Shared representation learning:** Projection layers map both modalities into a common 512-dimensional embedding space.
+4. **Model optimization:** Contrastive objectives, including Multi-Positive InfoNCE, margin-based contrastive loss, and triplet loss, are available to train image and text representations. An optional matching branch estimates image–caption compatibility.
+5. **Retrieval evaluation:** The evaluation pipeline measures ranking quality in text-to-image and image-to-text directions using Recall@K and other retrieval metrics.
+6. **Gallery creation:** Image and caption embeddings are precomputed and stored with image names and captions for efficient search.
+7. **Application serving:** The FastAPI backend loads a compatible trained checkpoint and retrieval gallery, converts incoming text or images into embeddings, runs similarity search, and formats ranked results.
 
-Person 3 should be marked **fully complete** only after the pending Backend integration/deployment checks and all required Website tasks above have been implemented and verified. The existing FastAPI core and 20 passing targeted tests are substantial progress, but they do not yet satisfy the full Backend & Website delivery scope.
+## Deployment Notes
 
-### Further Research and Development
+Training code and application serving are separate. The API loads an existing TensorFlow checkpoint; it does not start model training when a user sends a search request.
 
-- Complete the memory-safe training runs and architecture comparisons.
-- Investigate the low Phase 5 pilot Mean Recall and verify retrieval metric correctness.
-- Complete loss-function and hyperparameter experiments.
-- Run multi-seed experiments and five-fold cross-validation if compute/time permits.
-- Perform ablation studies and retrieval error analysis.
-- Evaluate the selected final model on the held-out test split only after model selection.
-- Compare inference latency and memory usage across final candidates.
-- Build the final gallery from the selected checkpoint and verify real text-to-image and image-to-text searches.
-- Explore FAISS for large-scale retrieval optimization.
+Dataset files, trained checkpoints, and generated retrieval galleries are not included as ordinary source files in the repository. They must be prepared or generated separately. The selected model checkpoint, vocabulary, preprocessing configuration, and retrieval gallery must be compatible with one another.
+
+The default gallery is built from the development data (training and validation images) and excludes the held-out test split. For a final performance report, evaluate the selected model on the held-out test split using the project's evaluation protocol; do not use test results for model selection.
+
+---
 
 ## Technologies Used
 
