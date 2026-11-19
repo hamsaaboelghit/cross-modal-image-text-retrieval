@@ -5,7 +5,7 @@ import { ArrowLeft, ArrowRight, ArrowUpRight, BrainCircuit, Camera, Database, Im
 
 const stages = [
   { number: "01", title: "Visual understanding", detail: "A ResNet50 image encoder extracts meaningful visual features from each image.", icon: Camera },
-  { number: "02", title: "Language understanding", detail: "An LSTM processes caption sequences and learns how words combine into meaning.", icon: Languages },
+  { number: "02", title: "Language understanding", detail: "The configured text encoder processes caption sequences and learns how words combine into meaning.", icon: Languages },
   { number: "03", title: "Shared embedding space", detail: "Both modalities are projected into a comparable feature space.", icon: Network },
   { number: "04", title: "Cross-modal retrieval", detail: "The system ranks the most relevant items using similarity between embeddings.", icon: Search },
 ];
