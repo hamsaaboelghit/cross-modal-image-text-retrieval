@@ -43,18 +43,28 @@ export default function Home() {
 
   useEffect(() => {
     let active = true;
-    fetch(`${API_BASE}/models`)
-      .then(async response => {
+    Promise.all([
+      fetch(`${API_BASE}/models`).then(async response => {
         if (!response.ok) throw new Error("Model service is not available.");
         return response.json();
-      })
-      .then(data => {
+      }),
+      fetch(`${API_BASE}/health`).then(async response => {
+        if (!response.ok) throw new Error("Backend health check failed.");
+        return response.json();
+      }),
+    ])
+      .then(([data, health]) => {
         if (!active) return;
         const available = Array.isArray(data.models) ? data.models : [];
         setModels(available);
         if (data.selected_model) setModel(data.selected_model);
+        if (health.status !== "ok") {
+          setError(health.startup_error || "The inference model or compatible gallery is not ready. Check the backend logs.");
+        }
       })
-      .catch(() => { if (active) setError("Backend is not connected yet. Start the FastAPI server and configure its model checkpoint and gallery."); });
+      .catch(() => {
+        if (active) setError("Backend is not connected yet. Start the FastAPI server and check its /health endpoint.");
+      });
     return () => { active = false; };
   }, []);
 
