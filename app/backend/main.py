@@ -17,10 +17,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field
+from dotenv import load_dotenv
 
 from app.backend.retrieval_service import RetrievalService
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
 MAX_UPLOAD_BYTES = int(os.getenv("VISIONMATCH_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 MAX_QUERY_CHARS = int(os.getenv("VISIONMATCH_MAX_QUERY_CHARS", "1000"))
 DEFAULT_TOP_K = int(os.getenv("VISIONMATCH_DEFAULT_TOP_K", "5"))
