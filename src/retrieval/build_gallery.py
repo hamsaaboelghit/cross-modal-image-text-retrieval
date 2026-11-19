@@ -1,6 +1,9 @@
 
 import json
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 import numpy as np
 import pandas as pd
@@ -11,6 +14,18 @@ from app.backend.model_service import ModelService
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
+
+_gallery_path = Path(
+    os.getenv(
+        "VISIONMATCH_GALLERY_PATH",
+        str(PROJECT_ROOT / "results" / "retrieval_gallery_fold1" / "gallery.npz"),
+    )
+).expanduser()
+if not _gallery_path.is_absolute():
+    _gallery_path = PROJECT_ROOT / _gallery_path
+OUTPUT_PATH = _gallery_path
+OUTPUT_DIR = OUTPUT_PATH.parent
 
 CAPTIONS_PATH = (
     PROJECT_ROOT
@@ -19,14 +34,6 @@ CAPTIONS_PATH = (
     / "flickr30k"
     / "captions.csv"
 )
-
-OUTPUT_DIR = (
-    PROJECT_ROOT
-    / "results"
-    / "retrieval_gallery_fold1"
-)
-
-OUTPUT_PATH = OUTPUT_DIR / "gallery.npz"
 
 BATCH_SIZE = 32
 FOLD_NUMBER = 1
@@ -264,6 +271,9 @@ def save_gallery(
         "source": "train + validation",
         "test_set_used": False,
         "checkpoint": str(service.checkpoint_path),
+        "checkpoint_fingerprint": service.checkpoint_info["checkpoint_fingerprint"],
+        "vocab_fingerprint": service.checkpoint_info["vocab_fingerprint"],
+        "metadata_version": 2,
         "format": "numpy_npz",
     }
 
