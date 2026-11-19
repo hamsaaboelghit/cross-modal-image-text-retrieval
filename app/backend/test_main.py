@@ -226,3 +226,84 @@ def test_search_returns_503_when_service_is_unavailable(monkeypatch):
         )
 
     assert response.status_code == 503
+
+
+def test_models_endpoint_lists_selected_model(client):
+    response = client.get("/models")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["selected_model"] == "baseline"
+    assert data["models"][0]["id"] == "baseline"
+    assert data["models"][0]["loaded"] is True
+
+
+def test_health_reports_degraded_when_service_missing(monkeypatch):
+    monkeypatch.setattr(
+        main,
+        "retrieval_service",
+        FakeRetrievalService(loaded=False),
+    )
+    with TestClient(main.app) as test_client:
+        response = test_client.get("/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "degraded"
+    assert response.json()["model_loaded"] is False
+
+
+def test_image_search_rejects_wrong_content_type(client):
+    response = client.post(
+        "/search/image",
+        files={"file": ("note.txt", b"not an image", "text/plain")},
+    )
+    assert response.status_code == 415
+
+
+def test_image_search_rejects_empty_file(client):
+    response = client.post(
+        "/search/image",
+        files={"file": ("empty.png", b"", "image/png")},
+    )
+    assert response.status_code == 400
+
+
+def test_text_search_rejects_whitespace_only_query(client):
+    response = client.post(
+        "/search/text",
+        json={"query": "   "},
+    )
+    assert response.status_code == 422
+
+
+def test_text_search_returns_rank_similarity_and_timing(client):
+    response = client.post(
+        "/search/text",
+        json={"query": "A dog"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["results"][0]["rank"] == 1
+    assert data["results"][0]["similarity"] == pytest.approx(0.95)
+    assert data["elapsed_ms"] >= 0
+
+
+def test_image_search_returns_ranked_caption_and_timing(client):
+    image = Image.new("RGB", (16, 16), color="blue")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    response = client.post(
+        "/search/image",
+        files={"file": ("sample.png", buffer.getvalue(), "image/png")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["results"][0]["rank"] == 1
+    assert data["results"][0]["caption"] == "A person walking."
+    assert data["elapsed_ms"] >= 0
+
+
+def test_model_selection_rejects_unloaded_model(client):
+    response = client.post(
+        "/search/text",
+        json={"query": "A dog", "model": "lstm"},
+    )
+    assert response.status_code == 400
