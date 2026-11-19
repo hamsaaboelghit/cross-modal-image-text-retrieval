@@ -44,6 +44,8 @@ class TrainingConfig:
     num_workers: int = 0
     pin_memory: bool = False
     drop_last: bool = False
+    max_train_steps_per_epoch: Optional[int] = None
+    max_validation_steps: Optional[int] = None
 
     # Reproducibility
     seed: int = 42
@@ -211,6 +213,13 @@ class TrainingConfig:
         for field_name in ("pin_memory", "drop_last", "save_best_only"):
             if not isinstance(getattr(self, field_name), bool):
                 raise TypeError(f"{field_name} must be a boolean.")
+
+        for field_name in ("max_train_steps_per_epoch", "max_validation_steps"):
+            value = getattr(self, field_name)
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value <= 0
+            ):
+                raise ValueError(f"{field_name} must be a positive integer or None.")
 
         # Reproducibility validation
         if (
