@@ -265,6 +265,8 @@ async def search_by_image(
             "elapsed_ms": round((time.perf_counter() - started) * 1000, 2),
             "results": results,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Image retrieval failed")
         raise HTTPException(status_code=500, detail="Image retrieval failed.") from exc
