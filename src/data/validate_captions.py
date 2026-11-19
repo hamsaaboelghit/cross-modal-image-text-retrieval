@@ -3,6 +3,8 @@ import csv
 from pathlib import Path
 from collections import Counter
 
+from src.data.image_files import iter_image_names
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -52,12 +54,13 @@ def validate_captions():
                 caption_number
             )
 
-    image_files = {
-        path.name
-        for path in IMAGE_DIR.rglob("*")
-        if path.is_file()
-        and path.suffix.lower() in {".jpg", ".jpeg"}
-    }
+    image_files = set()
+    for index, image_name in enumerate(iter_image_names(IMAGE_DIR), start=1):
+        image_files.add(image_name)
+        if index % 5000 == 0:
+            print(f"Scanned {index:,} image files...", flush=True)
+
+    print(f"Image file scan complete: {len(image_files):,} files.", flush=True)
 
     images_in_csv = set(captions_per_image.keys())
 
