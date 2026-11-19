@@ -63,7 +63,8 @@ def run_experiment(
         raise ValueError("output_dim must be positive.")
 
     if dropout is None:
-        dropout = 0.1 if model_type == "baseline" else 0.2
+        # Keep the dropout rate fixed across the architecture comparison.
+        dropout = 0.1
 
     if not 0.0 <= dropout < 1.0:
         raise ValueError("dropout must be in [0, 1).")

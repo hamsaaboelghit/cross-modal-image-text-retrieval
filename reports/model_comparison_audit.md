@@ -52,7 +52,7 @@ The local `experiment_runner.py` and experiment scripts confirm the following se
 | ResNet50 Fine-tuning | Disabled |
 | Mixed Precision | Disabled |
 
-The Baseline uses a default dropout of 0.1, while the full models use a default dropout of 0.2.
+All five architecture-comparison runs now use an explicit dropout value of 0.1. The shared runner also defaults to 0.1 for both Baseline and full models, so an omitted dropout argument cannot silently introduce a different rate.
 
 The experiment scripts use the same fold, seed, epoch count, and batch size.
 
@@ -76,9 +76,9 @@ Its configuration is:
 
 Unlike the other four experiments, this model includes an additional matching branch.
 
-The current training implementation adds a matching loss with a default weight of 0.2 when cross-modal attention is enabled.
+The training objective for Cross-Modal Attention includes an auxiliary matching loss with a default weight of 0.2. The other architectures optimize retrieval loss only. This objective difference remains intentional and must be disclosed.
 
-Therefore, this experiment does not optimize exactly the same training objective as the other four models.
+For validation and model selection, however, every architecture now uses the same retrieval-only validation loss. The matching validation loss and combined validation objective are logged separately for diagnosis, but they do not control early stopping, scheduler decisions, or best-checkpoint selection.
 
 ## 5. Fair Comparison Audit
 
@@ -86,8 +86,9 @@ Therefore, this experiment does not optimize exactly the same training objective
 
 - All five experiment scripts use the same dataset fold.
 - All five use the same random seed.
-- All five specify the same epoch count and batch size.
+- All five specify the same epoch count, batch size, and dropout rate (0.1).
 - All five use the common experiment runner.
+- All five use retrieval-only validation loss for early stopping and best-checkpoint selection.
 - The four full models use the same pretrained, frozen ResNet50 backbone.
 - The four full models use a 512-dimensional retrieval embedding.
 
@@ -97,19 +98,15 @@ Therefore, this experiment does not optimize exactly the same training objective
 
 The Baseline uses a custom CNN, while the other models use ResNet50 pretrained on ImageNet.
 
-**2. Different dropout values**
-
-The Baseline defaults to 0.1, while the full models default to 0.2.
-
-**3. Different training objectives**
+**2. Training objective difference**
 
 The Cross-Modal Attention model adds a matching loss to the retrieval loss.
 
-**4. Different model capacity**
+**3. Different model capacity**
 
 The models have different architectures and parameter counts. This is expected, but should be documented when interpreting results.
 
-**5. Retrieval embedding configuration**
+**4. Retrieval embedding configuration**
 
 `CrossModalRetrievalModel` accepts `output_dim` (default 512), and `experiment_runner.py` passes the configured value to the full-model constructor. The model uses this value for both image and text projection outputs. An automated regression test now checks that setting `output_dim=256` produces image embeddings shaped `[B, 256]` and text embeddings shaped `[B, C, 256]`.
 
@@ -132,9 +129,9 @@ The Baseline and full models use different image architectures and potentially d
 | GRU experiment script | Verified |
 | Transformer experiment script | Verified |
 | Cross-Modal Attention experiment script | Verified |
-| Common training settings | Verified in code |
+| Common training settings (including dropout) | Verified in code |
 | Model architecture differences | Documented |
-| Cross-modal matching loss difference | Identified |
+| Cross-modal matching loss difference | Identified and separately logged |
 | Actual completion of all five experiments | Not yet verified |
 | Training logs and checkpoints | Pending audit |
 | Validation retrieval metrics | Pending audit |

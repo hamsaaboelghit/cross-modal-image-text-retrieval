@@ -11,6 +11,7 @@ def main():
         unfreeze_last_block=False,
         epochs=5,
         batch_size=8,
+        dropout=0.1,
         seed=42,
         fold=1,
     )

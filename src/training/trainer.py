@@ -40,7 +40,12 @@ class Trainer:
 
         self.history = {
             "train_loss": [],
+            "train_retrieval_loss": [],
+            "train_matching_loss": [],
             "val_loss": [],
+            "val_retrieval_loss": [],
+            "val_matching_loss": [],
+            "val_total_loss": [],
             "learning_rate": [],
         }
 
@@ -144,7 +149,7 @@ class Trainer:
 
         return images, captions
 
-    def _compute_loss(
+    def _compute_loss_components(
         self,
         outputs,
         negative_matching_scores=None,
@@ -152,56 +157,58 @@ class Trainer:
         if not isinstance(outputs, dict):
             raise TypeError("Model must return a dictionary.")
 
-        required = {
-            "image_embeddings",
-            "text_embeddings",
-        }
+        required = {"image_embeddings", "text_embeddings"}
         missing = required - outputs.keys()
-
         if missing:
             raise KeyError(f"Missing model outputs: {missing}")
 
-        retrieval_loss = self.loss_fn(
-            outputs["image_embeddings"],
-            outputs["text_embeddings"],
-        )
-        retrieval_loss = tf.convert_to_tensor(retrieval_loss)
-
-        if retrieval_loss.shape.rank != 0:
-            raise ValueError(
-                "The retrieval loss function must return a scalar."
+        retrieval_loss = tf.convert_to_tensor(
+            self.loss_fn(
+                outputs["image_embeddings"],
+                outputs["text_embeddings"],
             )
+        )
+        if retrieval_loss.shape.rank != 0:
+            raise ValueError("The retrieval loss function must return a scalar.")
 
+        matching_loss = None
         total_loss = retrieval_loss
 
-        if self.use_matching_loss:
+        if self.use_matching_loss and negative_matching_scores is not None:
             if "matching_scores" not in outputs:
-                raise KeyError(
-                    "Cross-modal model must return 'matching_scores'."
-                )
-
-            if negative_matching_scores is None:
-                raise ValueError(
-                    "Negative matching scores are required "
-                    "when matching loss is enabled."
-                )
-
+                raise KeyError("Cross-modal model must return 'matching_scores'.")
             matching_loss = self.matching_loss_fn(
                 outputs["matching_scores"],
                 negative_matching_scores,
             )
-
             total_loss = (
                 retrieval_loss
                 + self.config.matching_loss_weight * matching_loss
             )
+        elif self.use_matching_loss and negative_matching_scores is None:
+            # Singleton batches have no valid in-batch negative.
+            matching_loss = None
 
         tf.debugging.assert_all_finite(
             total_loss,
             "Non-finite total training loss detected.",
         )
+        return {
+            "total_loss": total_loss,
+            "retrieval_loss": retrieval_loss,
+            "matching_loss": matching_loss,
+        }
 
-        return total_loss
+    def _compute_loss(
+        self,
+        outputs,
+        negative_matching_scores=None,
+    ):
+        """Backward-compatible scalar total objective."""
+        return self._compute_loss_components(
+            outputs,
+            negative_matching_scores=negative_matching_scores,
+        )["total_loss"]
 
     def _get_negative_matching_scores(
         self,
@@ -242,6 +249,9 @@ class Trainer:
 
     def train_epoch(self, train_loader):
         total_loss = 0.0
+        retrieval_loss_sum = 0.0
+        matching_loss_sum = 0.0
+        matching_samples = 0
         total_samples = 0
 
         for batch_index, batch in enumerate(train_loader):
@@ -268,14 +278,13 @@ class Trainer:
                             )
                         )
 
-                    if self.use_matching_loss and negative_scores is None:
-                        # A singleton batch has no valid in-batch negative.
-                        loss = self._compute_retrieval_loss(outputs)
-                    else:
-                        loss = self._compute_loss(
-                            outputs,
-                            negative_matching_scores=negative_scores,
-                        )
+                    loss_components = self._compute_loss_components(
+                        outputs,
+                        negative_matching_scores=negative_scores,
+                    )
+                    loss = loss_components["total_loss"]
+                    retrieval_loss = loss_components["retrieval_loss"]
+                    matching_loss = loss_components["matching_loss"]
 
                 variables = self.model.trainable_variables
                 gradients = tape.gradient(loss, variables)
@@ -305,6 +314,10 @@ class Trainer:
                 )
 
             total_loss += float(loss.numpy()) * batch_size
+            retrieval_loss_sum += float(retrieval_loss.numpy()) * batch_size
+            if matching_loss is not None:
+                matching_loss_sum += float(matching_loss.numpy()) * batch_size
+                matching_samples += batch_size
             total_samples += batch_size
             self.global_step += 1
 
@@ -318,7 +331,19 @@ class Trainer:
             raise RuntimeError("The training dataset is empty.")
 
         average_loss = total_loss / total_samples
+        average_retrieval_loss = retrieval_loss_sum / total_samples
+        average_matching_loss = (
+            matching_loss_sum / matching_samples
+            if matching_samples > 0
+            else None
+        )
         self.history["train_loss"].append(average_loss)
+        self.history["train_retrieval_loss"].append(
+            average_retrieval_loss
+        )
+        self.history["train_matching_loss"].append(
+            average_matching_loss
+        )
 
         return average_loss
 
@@ -479,12 +504,28 @@ class Trainer:
 
                 self.current_epoch = epoch + 1
                 val_loss = None
+                val_matching_loss = None
+                val_total_loss = None
 
                 if evaluator is not None:
                     validation_results = evaluator.evaluate(val_loader)
-                    val_loss = float(validation_results["val_loss"])
+                    # val_loss is retrieval-only and is the shared
+                    # model-selection metric across all architectures.
+                    val_loss = float(validation_results["val_retrieval_loss"])
+                    val_matching_loss = validation_results["val_matching_loss"]
+                    val_total_loss = float(validation_results["val_total_loss"])
+
                     self.history["val_loss"].append(val_loss)
-                    print(f"Validation Loss: {val_loss:.4f}")
+                    self.history["val_retrieval_loss"].append(val_loss)
+                    self.history["val_matching_loss"].append(val_matching_loss)
+                    self.history["val_total_loss"].append(val_total_loss)
+
+                    print(f"Validation retrieval loss: {val_loss:.4f}")
+                    if val_matching_loss is not None:
+                        print(
+                            "Validation matching loss (reported separately): "
+                            f"{val_matching_loss:.4f}"
+                        )
 
                 self.history["learning_rate"].append(
                     epoch_learning_rate
@@ -527,9 +568,23 @@ class Trainer:
                         train_loss=train_loss,
                         val_loss=val_loss,
                         learning_rate=epoch_learning_rate,
+                        train_retrieval_loss=self.history["train_retrieval_loss"][-1],
+                        train_matching_loss=self.history["train_matching_loss"][-1],
+                        val_retrieval_loss=val_loss,
+                        val_matching_loss=val_matching_loss,
+                        val_total_loss=val_total_loss,
                     )
 
-                print(f"Training Loss: {train_loss:.4f}")
+                print(f"Training objective: {train_loss:.4f}")
+                print(
+                    "Training retrieval loss: "
+                    f"{self.history['train_retrieval_loss'][-1]:.4f}"
+                )
+                if self.history["train_matching_loss"][-1] is not None:
+                    print(
+                        "Training matching loss: "
+                        f"{self.history['train_matching_loss'][-1]:.4f}"
+                    )
                 print(
                     f"Learning Rate Used: "
                     f"{epoch_learning_rate:.8f}"
