@@ -129,6 +129,23 @@ The data pipeline includes the following stages:
   - `EOS`
 - Encode captions using a maximum sequence length of 34.
 
+### Dataset integrity checks
+
+Run the lightweight structural checks from the repository root:
+
+```bash
+python -m src.data.inspect_dataset
+python -m src.data.validate_captions
+```
+
+The image scan reports progress every 5,000 files. To decode and verify every JPEG file separately (this can take longer on a Windows-mounted WSL drive), run:
+
+```bash
+python -m src.data.validate_images
+```
+
+These checks validate local files; the dataset itself is not stored in GitHub.
+
 ### TensorFlow Data Pipeline
 
 The `Flickr30kDataset` class provides TensorFlow-compatible datasets using `tf.data`.
