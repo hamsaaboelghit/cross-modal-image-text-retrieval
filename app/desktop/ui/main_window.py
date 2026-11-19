@@ -9,6 +9,11 @@ import urllib.request
 
 from PySide6.QtCore import Qt, QSize, QThread, Signal
 from PySide6.QtGui import QPixmap
+from dotenv import load_dotenv
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(PROJECT_ROOT / ".env")
+
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -68,11 +73,14 @@ class RetrievalWorker(QThread):
                 boundary = "----VisionMatchDesktopBoundary"
                 path = Path(self.image_path)
                 mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+                if mime not in {"image/jpeg", "image/png", "image/webp"}:
+                    raise ValueError("Choose a JPEG, PNG, or WEBP image.")
+                safe_name = path.name.replace('"', "").replace("\\r", "").replace("\\n", "")
                 with path.open("rb") as image_file:
                     image_bytes = image_file.read()
                 parts = [
                     f"--{boundary}\r\n".encode(),
-                    f'Content-Disposition: form-data; name="file"; filename="{path.name}"\r\n'.encode(),
+                    f'Content-Disposition: form-data; name="file"; filename="{safe_name}"\r\n'.encode(),
                     f"Content-Type: {mime}\r\n\r\n".encode(),
                     image_bytes,
                     f"\r\n--{boundary}--\r\n".encode(),
