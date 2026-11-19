@@ -28,7 +28,11 @@ MAX_QUERY_CHARS = int(os.getenv("VISIONMATCH_MAX_QUERY_CHARS", "1000"))
 DEFAULT_TOP_K = int(os.getenv("VISIONMATCH_DEFAULT_TOP_K", "5"))
 MAX_TOP_K = int(os.getenv("VISIONMATCH_MAX_TOP_K", "50"))
 IMAGE_DIR = Path(os.getenv("VISIONMATCH_IMAGE_DIR", str(PROJECT_ROOT / "data/raw/flickr30k-images"))).expanduser()
+if not IMAGE_DIR.is_absolute():
+    IMAGE_DIR = PROJECT_ROOT / IMAGE_DIR
 METRICS_PATH = Path(os.getenv("VISIONMATCH_METRICS_PATH", str(PROJECT_ROOT / "results/experiments"))).expanduser()
+if not METRICS_PATH.is_absolute():
+    METRICS_PATH = PROJECT_ROOT / METRICS_PATH
 MODEL_TYPE = os.getenv("VISIONMATCH_MODEL_TYPE", "baseline").strip().lower()
 MODEL_LABELS = {
     "baseline": "CNN + mean-pooled text baseline",
@@ -49,8 +53,10 @@ async def lifespan(app: FastAPI):
     logger.info("Starting VisionMatch AI API")
     try:
         retrieval_service.load()
+        app.state.startup_error = None
         logger.info("Inference model and retrieval gallery loaded")
-    except Exception:
+    except Exception as exc:
+        app.state.startup_error = str(exc)
         logger.exception("Inference service failed to load")
         # Keep the API available for /health and /models diagnostics.
     yield
@@ -178,6 +184,10 @@ def health_check():
         "model_loaded": loaded,
         "model_type": MODEL_TYPE,
         "gallery_loaded": bool(loaded and metadata),
+        "startup_error": None if loaded else getattr(app.state, "startup_error", None),
+        "gallery_model_type": metadata.get("model_type"),
+        "gallery_image_count": metadata.get("image_count"),
+        "artifact_metadata_version": metadata.get("metadata_version"),
     }
 
 
@@ -201,6 +211,8 @@ def list_models():
                 {},
             ).get("checkpoint_kind"),
             "embedding_dim": metadata.get("embedding_dim", 512),
+            "gallery_image_count": metadata.get("image_count"),
+            "gallery_compatible": bool(_service_loaded() and metadata),
         }],
         "selection_note": (
             "This API process serves one configured model. To compare multiple "
