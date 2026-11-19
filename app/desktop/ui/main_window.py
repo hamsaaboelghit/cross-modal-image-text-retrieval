@@ -400,7 +400,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(title_layout)
         layout.addStretch()
 
-        status = QLabel("●  Backend not connected")
+        status = QLabel(f"●  API: {self.api_base}")
         status.setStyleSheet("""
             color: #A47728;
             background-color: #FFFAF0;
@@ -653,7 +653,7 @@ class MainWindow(QMainWindow):
         )
 
         results_hint = QLabel(
-            "Connect the backend to display matching images and captions."
+            "Run a search to display matching images or captions here."
         )
         results_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         results_hint.setWordWrap(True)
@@ -973,6 +973,9 @@ class MainWindow(QMainWindow):
                 self.show_message(
                     "Please enter a description before searching."
                 )
+                return
+            if len(query) > 1000:
+                self.show_message("Description must be 1,000 characters or fewer.")
                 return
 
         else:
