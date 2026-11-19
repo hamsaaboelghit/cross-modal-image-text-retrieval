@@ -546,7 +546,7 @@ python -m src.retrieval.build_gallery
 ### 2. Start the Backend
 
 ```bash
-python -m uvicorn app.backend.main:app --reload
+python -m uvicorn app.backend.main:app --reload --env-file .env
 ```
 
 The backend starts at:
