@@ -1,14 +1,9 @@
-"""Evaluate a completed VisionMatch checkpoint without assuming a fixed run budget.
+"""Evaluate an existing VisionMatch checkpoint on the validation split only.
 
-This runner is intentionally separate from evaluation_runner.py:
-- accepts timestamped checkpoint directories or checkpoint prefixes;
-- reads and preserves the exact TrainingConfig stored beside the checkpoint;
-- requires architecture settings explicitly because current checkpoint metadata
-  stores training settings but not the full model architecture;
-- evaluates validation retrieval in both directions;
-- optionally evaluates the cross-modal matching head separately.
-
-It never evaluates the held-out test split.
+The evaluator does not discover or assume that all model runs have finished.
+Pass the checkpoint for one completed run explicitly. It reads the fold and
+training metadata from that checkpoint, then evaluates both retrieval
+directions without touching the held-out test split.
 """
 
 import argparse
@@ -31,30 +26,31 @@ from src.evaluation.matching_evaluator import MatchingEvaluator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-FOLD = 1
-SEED = 42
-VOCAB_PATH = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-    / "flickr30k"
-    / "vocabularies"
-    / f"fold_{FOLD}_vocab.json"
+VOCABULARY_DIR = (
+    PROJECT_ROOT / "data" / "processed" / "flickr30k" / "vocabularies"
 )
 
 
 def resolve_checkpoint(checkpoint_arg: str, kind: str) -> str:
+    """Resolve an experiment directory, best/latest directory, or prefix."""
     path = Path(checkpoint_arg).expanduser()
     if not path.is_absolute():
         path = PROJECT_ROOT / path
 
+    # TensorFlow checkpoint prefixes have a sibling '<prefix>.index' file.
+    # Check this before Path.is_file(), because the prefix itself is not a file.
+    prefix_candidate = str(path)
+    if Path(prefix_candidate + ".index").is_file():
+        return prefix_candidate
+
     if path.is_file():
-        prefix = str(path)
-        if prefix.endswith(".index"):
-            prefix = prefix[:-6]
-        if not Path(prefix + ".index").is_file():
-            raise FileNotFoundError(f"Invalid checkpoint prefix: {prefix}")
-        return prefix
+        if str(path).endswith(".index"):
+            prefix_candidate = str(path)[:-6]
+            if Path(prefix_candidate + ".index").is_file():
+                return prefix_candidate
+        raise FileNotFoundError(
+            f"Expected a TensorFlow checkpoint prefix or .index file: {path}"
+        )
 
     if not path.is_dir():
         raise FileNotFoundError(f"Checkpoint path does not exist: {path}")
@@ -72,51 +68,63 @@ def resolve_checkpoint(checkpoint_arg: str, kind: str) -> str:
 
 
 def read_checkpoint_metadata(prefix: str) -> dict:
+    """Read the sidecar written by CheckpointManager for this exact prefix."""
     metadata_path = Path(prefix + ".json")
     if not metadata_path.is_file():
         raise FileNotFoundError(
-            f"Checkpoint metadata is required but missing: {metadata_path}"
+            "Checkpoint metadata is required but missing: "
+            f"{metadata_path}"
         )
 
     with metadata_path.open("r", encoding="utf-8") as handle:
         metadata = json.load(handle)
 
-    if not isinstance(metadata, dict) or not isinstance(metadata.get("config"), dict):
+    if not isinstance(metadata, dict) or not isinstance(
+        metadata.get("config"), dict
+    ):
         raise ValueError("Checkpoint metadata must contain a config object.")
 
-    required_training_fields = {
-        "epochs", "batch_size", "learning_rate", "optimizer",
-        "loss_type", "temperature", "seed", "fold",
+    required_fields = {
+        "epochs",
+        "batch_size",
+        "learning_rate",
+        "optimizer",
+        "loss_type",
+        "temperature",
+        "seed",
+        "fold",
     }
-    missing = required_training_fields - metadata["config"].keys()
+    missing = required_fields - metadata["config"].keys()
     if missing:
         raise ValueError(
-            f"Checkpoint training config is incomplete: {sorted(missing)}"
+            "Checkpoint training config is incomplete: "
+            f"{sorted(missing)}"
         )
 
-    if int(metadata["config"]["fold"]) != FOLD:
-        raise ValueError(
-            f"This runner is configured for fold {FOLD}, but checkpoint "
-            f"metadata says fold {metadata['config']['fold']}."
-        )
-
-    if int(metadata["config"]["seed"]) != SEED:
-        print(
-            "[WARNING] Checkpoint seed differs from the default project seed: "
-            f"{metadata['config']['seed']}. Recording the checkpoint value."
-        )
+    fold = metadata["config"]["fold"]
+    seed = metadata["config"]["seed"]
+    if isinstance(fold, bool) or not isinstance(fold, int) or fold not in range(1, 6):
+        raise ValueError(f"Invalid fold in checkpoint metadata: {fold!r}")
+    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+        raise ValueError(f"Invalid seed in checkpoint metadata: {seed!r}")
 
     return metadata
 
 
 def build_model(vocab_size: int, args):
+    """Build the exact selected architecture before restoring its weights."""
     if args.model_type == "baseline":
+        if args.cross_modal_attention:
+            raise ValueError("Baseline does not support cross-modal attention.")
         return BaselineRetrievalModel(
             vocab_size=vocab_size,
             embedding_dim=args.embedding_dim,
             output_dim=args.output_dim,
             dropout=args.dropout,
         )
+
+    if args.encoder_type is None:
+        raise ValueError("--encoder-type is required when --model-type full.")
 
     return CrossModalRetrievalModel(
         vocab_size=vocab_size,
@@ -125,21 +133,29 @@ def build_model(vocab_size: int, args):
         hidden_dim=args.hidden_dim,
         num_layers=args.num_layers,
         dropout=args.dropout,
-        bidirectional=False,
-        use_attention=True,
+        bidirectional=args.bidirectional,
+        use_attention=args.use_attention,
         pretrained=args.pretrained,
         unfreeze_last_block=args.unfreeze_last_block,
-        train_all_backbone=False,
+        train_all_backbone=args.train_all_backbone,
+        projection_dropout=args.projection_dropout,
         use_cross_modal_attention=args.cross_modal_attention,
+        cross_modal_num_heads=args.cross_modal_num_heads,
+        cross_modal_dropout=args.cross_modal_dropout,
         output_dim=args.output_dim,
     )
 
 
 def restore_checkpoint(model, prefix: str):
-    status = tf.train.Checkpoint(model=model).restore(prefix)
+    """Restore model weights from CheckpointManager's 'model' object."""
+    checkpoint = tf.train.Checkpoint(model=model)
+    status = checkpoint.restore(prefix)
+    # CheckpointManager also stores optimizer and scalar training state.
+    # Those are intentionally absent during inference; all model objects
+    # must match, while extra checkpoint objects are expected.
     status.assert_existing_objects_matched()
     status.expect_partial()
-    print("[PASS] Checkpoint weights restored.")
+    print("[PASS] Model weights restored; non-model training state ignored.")
 
 
 def save_json(path: Path, payload: dict):
@@ -150,78 +166,149 @@ def save_json(path: Path, payload: dict):
     temporary.replace(path)
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(
-        description="Evaluate a completed VisionMatch checkpoint on validation only."
+        description=(
+            "Evaluate one completed VisionMatch checkpoint on validation only."
+        )
     )
-    parser.add_argument("--checkpoint", required=True,
-                        help="Timestamped experiment directory or TensorFlow checkpoint prefix.")
-    parser.add_argument("--checkpoint-kind", choices=("best", "latest"), default="best")
-    parser.add_argument("--model-type", choices=("baseline", "full"), required=True)
-    parser.add_argument("--encoder-type",
-                        choices=("rnn", "lstm", "gru", "transformer"), default="lstm")
+    parser.add_argument(
+        "--checkpoint",
+        required=True,
+        help="Experiment directory, best/latest directory, or checkpoint prefix.",
+    )
+    parser.add_argument(
+        "--checkpoint-kind",
+        choices=("best", "latest"),
+        default="best",
+        help="Used when --checkpoint points to an experiment directory.",
+    )
+    parser.add_argument(
+        "--model-type", choices=("baseline", "full"), required=True
+    )
+    parser.add_argument(
+        "--encoder-type",
+        choices=("rnn", "lstm", "gru", "transformer"),
+        default=None,
+    )
     parser.add_argument("--cross-modal-attention", action="store_true")
-    parser.add_argument("--pretrained", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--pretrained", action=argparse.BooleanOptionalAction, default=True
+    )
     parser.add_argument("--unfreeze-last-block", action="store_true")
+    parser.add_argument("--train-all-backbone", action="store_true")
+    parser.add_argument("--bidirectional", action="store_true")
+    parser.add_argument(
+        "--use-attention", action=argparse.BooleanOptionalAction, default=True
+    )
     parser.add_argument("--embedding-dim", type=int, default=300)
     parser.add_argument("--hidden-dim", type=int, default=512)
     parser.add_argument("--num-layers", type=int, default=1)
     parser.add_argument("--output-dim", type=int, default=512)
     parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--projection-dropout", type=float, default=0.1)
+    parser.add_argument("--cross-modal-num-heads", type=int, default=8)
+    parser.add_argument("--cross-modal-dropout", type=float, default=0.1)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=4,
+        help="Evaluation batch size; independent of the training batch size.",
+    )
     parser.add_argument("--query-batch-size", type=int, default=16)
-    parser.add_argument("--candidate-chunk-size", type=int, default=2048)
-    parser.add_argument("--evaluate-matching", action="store_true",
-                        help="Also evaluate the matching head; requires --cross-modal-attention.")
-    parser.add_argument("--output", default=None,
-                        help="Optional output JSON path.")
+    parser.add_argument("--candidate-chunk-size", type=int, default=1024)
+    parser.add_argument(
+        "--evaluate-matching",
+        action="store_true",
+        help="Also evaluate the matching head; requires cross-modal attention.",
+    )
+    parser.add_argument("--output", default=None, help="Optional output JSON path.")
     args = parser.parse_args()
 
+    if args.model_type == "full" and args.encoder_type is None:
+        parser.error("--encoder-type is required for a full model.")
     if args.evaluate_matching and not args.cross_modal_attention:
         parser.error("--evaluate-matching requires --cross-modal-attention.")
-
     if args.model_type == "baseline" and args.cross_modal_attention:
         parser.error("The baseline model does not support cross-modal attention.")
+    if args.batch_size < 1:
+        parser.error("--batch-size must be positive.")
+    if args.evaluate_matching and args.batch_size < 2:
+        parser.error("Matching evaluation requires --batch-size >= 2.")
+    if args.query_batch_size < 1 or args.candidate_chunk_size < 1:
+        parser.error("Query and candidate chunk sizes must be positive.")
+    if args.num_layers < 1 or args.embedding_dim < 1 or args.hidden_dim < 1:
+        parser.error("Model dimensions and number of layers must be positive.")
+    if args.output_dim < 1 or args.cross_modal_num_heads < 1:
+        parser.error("Output dimension and cross-modal head count must be positive.")
+    if not 0.0 <= args.dropout < 1.0:
+        parser.error("--dropout must be in [0, 1).")
+    if not 0.0 <= args.projection_dropout < 1.0:
+        parser.error("--projection-dropout must be in [0, 1).")
+    if not 0.0 <= args.cross_modal_dropout < 1.0:
+        parser.error("--cross-modal-dropout must be in [0, 1).")
+    return args
 
-    if args.batch_size < 2 and args.evaluate_matching:
-        parser.error("Matching evaluation requires batch size >= 2.")
 
-    tf.keras.utils.set_random_seed(SEED)
-
+def main():
+    args = parse_args()
     prefix = resolve_checkpoint(args.checkpoint, args.checkpoint_kind)
     metadata = read_checkpoint_metadata(prefix)
     training_config = metadata["config"]
+    fold = training_config["fold"]
+    seed = training_config["seed"]
 
-    print("=" * 68)
-    print("VISIONMATCH AI — CHECKPOINT EVALUATION")
-    print("=" * 68)
+    # Evaluation is deterministic and uses the fold recorded by training.
+    tf.keras.utils.set_random_seed(seed)
+
+    print("=" * 72)
+    print("VISIONMATCH AI — VALIDATION CHECKPOINT EVALUATION")
+    print("=" * 72)
     print("Checkpoint:", prefix)
+    print("Model type:", args.model_type)
     print("Checkpoint epoch (0-based):", metadata.get("epoch"))
     print("Checkpoint validation loss:", metadata.get("val_loss"))
-    print("Recorded training config:")
+    print("Training fold / seed:", fold, "/", seed)
+    print("Training configuration:")
     print(json.dumps(training_config, indent=2, ensure_ascii=False))
+    print(
+        "[NOTICE] Architecture arguments are supplied by the caller because "
+        "the current checkpoint metadata does not persist all model arguments."
+    )
 
-    vocabulary = load_vocabulary(VOCAB_PATH)
+    vocabulary_path = VOCABULARY_DIR / f"fold_{fold}_vocab.json"
+    vocabulary = load_vocabulary(vocabulary_path)
     model = build_model(len(vocabulary), args)
 
+    # Build every model variable before restoring checkpoint tensors.
+    # BOS=2 and EOS=3 are valid vocabulary special-token IDs.
     dummy_images = tf.zeros((1, IMAGE_SIZE, IMAGE_SIZE, 3), tf.float32)
-    dummy_captions = tf.fill(
-        (1, EXPECTED_CAPTIONS, MAX_LENGTH),
-        tf.constant(4, dtype=tf.int32),
+    dummy_caption = tf.concat(
+        [
+            tf.constant([[2, 3]], dtype=tf.int32),
+            tf.zeros((1, MAX_LENGTH - 2), dtype=tf.int32),
+        ],
+        axis=1,
+    )
+    dummy_captions = tf.tile(
+        dummy_caption[:, tf.newaxis, :],
+        (1, EXPECTED_CAPTIONS, 1),
     )
     model(dummy_images, dummy_captions, training=False)
     restore_checkpoint(model, prefix)
 
     validation_data = Flickr30kDataset(
-        fold_number=FOLD,
+        fold_number=fold,
         split="validation",
+        caption_count=EXPECTED_CAPTIONS,
+        image_augmentation="none",
     )
     validation_dataset = validation_data.as_dataset(
         batch_size=args.batch_size,
         shuffle=False,
         drop_remainder=False,
-        prefetch=True,
-        seed=int(training_config["seed"]),
+        prefetch=False,
+        seed=seed,
     )
 
     retrieval_evaluator = RetrievalEvaluator(
@@ -233,28 +320,48 @@ def main():
     retrieval_results = retrieval_evaluator.evaluate(validation_dataset)
     retrieval_results.pop("image_names", None)
 
+    architecture = {
+        "model_type": args.model_type,
+        "encoder_type": args.encoder_type if args.model_type == "full" else None,
+        "cross_modal_attention": args.cross_modal_attention,
+        "pretrained": args.pretrained if args.model_type == "full" else False,
+        "unfreeze_last_block": (
+            args.unfreeze_last_block if args.model_type == "full" else False
+        ),
+        "train_all_backbone": (
+            args.train_all_backbone if args.model_type == "full" else False
+        ),
+        "bidirectional": args.bidirectional if args.model_type == "full" else False,
+        "use_attention": args.use_attention if args.model_type == "full" else None,
+        "embedding_dim": args.embedding_dim,
+        "hidden_dim": args.hidden_dim if args.model_type == "full" else None,
+        "num_layers": args.num_layers if args.model_type == "full" else None,
+        "output_dim": args.output_dim,
+        "dropout": args.dropout,
+        "projection_dropout": (
+            args.projection_dropout if args.model_type == "full" else None
+        ),
+        "cross_modal_num_heads": (
+            args.cross_modal_num_heads if args.cross_modal_attention else None
+        ),
+        "cross_modal_dropout": (
+            args.cross_modal_dropout if args.cross_modal_attention else None
+        ),
+    }
+
     payload = {
         "experiment": Path(prefix).parent.parent.name,
         "checkpoint_path": prefix,
         "checkpoint_metadata": metadata,
-        "model_architecture": {
-            "model_type": args.model_type,
-            "encoder_type": None if args.model_type == "baseline" else args.encoder_type,
-            "cross_modal_attention": args.cross_modal_attention,
-            "pretrained": args.pretrained if args.model_type == "full" else False,
-            "unfreeze_last_block": args.unfreeze_last_block if args.model_type == "full" else False,
-            "embedding_dim": args.embedding_dim,
-            "hidden_dim": args.hidden_dim if args.model_type == "full" else None,
-            "num_layers": args.num_layers if args.model_type == "full" else None,
-            "output_dim": args.output_dim,
-            "dropout": args.dropout,
-        },
+        "model_architecture_supplied_for_restore": architecture,
         "evaluation": {
             "split": "validation",
-            "fold": FOLD,
-            "batch_size": args.batch_size,
+            "fold": fold,
+            "training_seed": seed,
+            "evaluation_batch_size": args.batch_size,
             "shuffle": False,
             "drop_remainder": False,
+            "prefetch": False,
             "image_size": IMAGE_SIZE,
             "captions_per_image": EXPECTED_CAPTIONS,
             "max_length": MAX_LENGTH,
@@ -268,16 +375,16 @@ def main():
 
     if args.evaluate_matching:
         matching_evaluator = MatchingEvaluator(model=model)
-        # A fresh deterministic dataset iterator is created from the same
-        # validation split; no weights or checkpoints are modified.
         matching_dataset = validation_data.as_dataset(
             batch_size=args.batch_size,
             shuffle=False,
             drop_remainder=False,
-            prefetch=True,
-            seed=int(training_config["seed"]),
+            prefetch=False,
+            seed=seed,
         )
-        payload["matching_metrics"] = matching_evaluator.evaluate(matching_dataset)
+        payload["matching_metrics"] = matching_evaluator.evaluate(
+            matching_dataset
+        )
 
     default_output = (
         PROJECT_ROOT
