@@ -24,6 +24,7 @@ The project explores different neural network architectures, attention mechanism
 - [Website Application](#website-application)
 - [FastAPI Backend](#fastapi-backend)
 - [Desktop Application](#desktop-application)
+- [Flutter Mobile Application](#flutter-mobile-application)
 - [Installation](#installation)
 - [Dataset Setup](#dataset-setup)
 - [Running the Project](#running-the-project)
@@ -419,6 +420,40 @@ The desktop client supports:
 
 Install dependencies once with `python -m pip install -r requirements.txt`, then run `python app/desktop/main.py` from the repository root. Search history is held in memory only and is cleared when the application closes. The desktop app is an inference client; model loading and retrieval are handled by the backend. See [Desktop Setup Guide](app/desktop/README.md).
 
+
+---
+
+## Flutter Mobile Application
+
+A Flutter mobile client is available under `app/mobile/flutter`. It connects to the same FastAPI inference service used by the website and desktop client. It supports Text-to-Image and Image-to-Text retrieval, photo selection from the device gallery, Top-K selection, backend readiness checks, ranked results, similarity scores, and image previews.
+
+Flutter packages are managed separately from Python packages using `pubspec.yaml`; they do not belong in the root `requirements.txt`.
+
+### Setup
+
+Install Flutter 3.19 or newer and the Android SDK (Android Studio). From the Flutter app directory, generate the native runner folders and install Dart packages:
+
+```bash
+cd app/mobile/flutter
+flutter create --platforms=android,ios .
+flutter pub get
+```
+
+For Android development, start the API from the repository root so it listens on the local network:
+
+```bash
+python -m uvicorn app.backend.main:app --host 0.0.0.0 --port 8000
+```
+
+Then run the app:
+
+```bash
+cd app/mobile/flutter
+flutter run
+```
+
+The app's Backend API address field defaults to `http://10.0.2.2:8000` for the Android emulator. For a physical phone, enter the computer's LAN IPv4 address (for example, `http://192.168.1.10:8000`); both devices must be on the same Wi-Fi network. Use an HTTPS URL for production. See [Flutter Mobile Setup](app/mobile/flutter/README.md) for platform-specific notes, including local HTTP and iOS photo-library configuration.
+
 ---
 
 ## FastAPI Backend
@@ -667,6 +702,11 @@ cross-modal-image-text-retrieval/
 │
 ├── app/
 │   ├── desktop/
+│   ├── mobile/
+│   │   └── flutter/
+│   │       ├── lib/main.dart
+│   │       ├── pubspec.yaml
+│   │       └── README.md
 │   ├── backend/
 │   │   ├── main.py
 │   │   ├── model_service.py
