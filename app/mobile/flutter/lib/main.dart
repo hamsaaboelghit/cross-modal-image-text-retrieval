@@ -257,6 +257,8 @@ class _RetrievalHomePageState extends State<RetrievalHomePage> {
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
           children: [
             _connectionCard(),
+            const SizedBox(height: 10),
+            _apiUrlCard(),
             const SizedBox(height: 22),
             const Text('Find what you’re looking for',
                 style: TextStyle(fontSize: 23, fontWeight: FontWeight.w800, color: Color(0xFF17172A))),
@@ -374,6 +376,42 @@ class _RetrievalHomePageState extends State<RetrievalHomePage> {
       ),
     );
   }
+
+  Widget _apiUrlCard() => Container(
+        padding: const EdgeInsets.all(14),
+        decoration: _cardDecoration(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Backend API address',
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+            const SizedBox(height: 9),
+            TextField(
+              controller: _apiController,
+              keyboardType: TextInputType.url,
+              decoration: const InputDecoration(
+                hintText: 'http://10.0.2.2:8000',
+                prefixIcon: Icon(Icons.link_rounded),
+                isDense: true,
+              ),
+              onSubmitted: (_) => _checkHealth(),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Emulator: 10.0.2.2 · Phone: your computer LAN IP',
+              style: TextStyle(fontSize: 10, color: Colors.black54),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: _checkHealth,
+                icon: const Icon(Icons.wifi_tethering_rounded, size: 16),
+                label: const Text('Test connection'),
+              ),
+            ),
+          ],
+        ),
+      );
 
   Widget _textQueryCard() => Container(
         padding: const EdgeInsets.all(16),
