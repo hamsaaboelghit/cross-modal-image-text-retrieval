@@ -49,6 +49,8 @@ def run_experiment(
     output_dim=512,
     dropout=None,
     log_dir="runs",
+    max_train_steps_per_epoch=None,
+    max_validation_steps=None,
 ):
     """
     Run one reproducible image-text retrieval experiment.
@@ -135,6 +137,8 @@ def run_experiment(
         num_workers=0,
         pin_memory=False,
         drop_last=drop_last,
+        max_train_steps_per_epoch=max_train_steps_per_epoch,
+        max_validation_steps=max_validation_steps,
         seed=seed,
         fold=fold,
         device="auto",
@@ -201,6 +205,8 @@ def run_experiment(
     print(f"Training captions per image: {caption_count}")
     print(f"Training image augmentation: {image_augmentation}")
     print(f"Negative sampling strategy: {negative_sampling_strategy}")
+    print(f"Train steps per epoch: {max_train_steps_per_epoch or 'FULL DATASET'}")
+    print(f"Validation batches per epoch: {max_validation_steps or 'FULL DATASET'}")
 
     if loss_type == "info_nce":
         loss_fn = MultiPositiveInfoNCELoss(temperature=config.temperature)

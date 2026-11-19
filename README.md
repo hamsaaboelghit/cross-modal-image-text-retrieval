@@ -452,8 +452,8 @@ pip install -r requirements.txt
 
 ### Main Dependencies
 
-- Python 3.11
-- TensorFlow 2.16.2
+- Python 3.11–3.12
+- TensorFlow 2.16.2–2.21.0 (see the supported range in requirements.txt; GPU support depends on the OS/WSL CUDA setup)
 - Keras
 - NumPy
 - Pandas
@@ -555,7 +555,7 @@ Use the interactive API interface to test text and image retrieval.
 
 ### Model Configuration
 
-The backend supports environment variables for selecting the model and checkpoint paths:
+The backend supports environment variables for selecting the model and checkpoint paths. Checkpoints and galleries are generated locally and are not committed to GitHub:
 
 | Variable | Default |
 |---|---|
@@ -636,78 +636,43 @@ cross-modal-image-text-retrieval/
 
 ## Testing
 
-The project includes automated tests covering:
+The repository includes automated tests for data preprocessing, model components, training utilities, retrieval metrics, gallery handling, and FastAPI services.
 
-- Dataset integrity and preprocessing.
-- TensorFlow data pipelines.
-- Baseline and advanced model architectures.
-- RNN, LSTM, GRU, and Transformer encoders.
-- Attention mechanisms.
-- Gradient flow.
-- Contrastive and matching loss integration.
-- Retrieval metrics and ranking.
-- Gallery and retrieval services.
-- FastAPI endpoints.
-- Package imports and training integration.
-
-Run the complete test suite from the project root:
+Run the test suite from the project root:
 
 ```bash
 python -m pytest -v
 ```
 
-### Latest Local Test Result
+Backend-focused tests can be run separately:
 
-```text
-103 passed
-0 failed
-0 errors
+```bash
+python -m pytest app/backend/test_main.py app/backend/test_retrieval_service.py -v
 ```
 
-The full test suite completed successfully in the local development environment on November 18, 2026.
+These tests cover API and service behavior. Tests that use mock model services or synthetic galleries validate software contracts; they do not measure retrieval quality or replace an end-to-end test with a trained checkpoint and real gallery.
 
 ---
 
-## Current Implementation Status
+## System Workflow
 
-### Implemented and Tested
+VisionMatch AI follows a modular image–text retrieval pipeline:
 
-- Flickr30k dataset pipeline.
-- Image and caption preprocessing.
-- Vocabulary construction and caption encoding.
-- CNN baseline model.
-- RNN, LSTM, GRU, and Transformer text encoders.
-- ResNet50-based image encoder.
-- Additive Attention.
-- Cross-Modal Attention.
-- Matching branch and matching loss components.
-- Contrastive loss implementations.
-- TensorFlow training components.
-- Model checkpoint loading and restoration.
-- Retrieval evaluation pipeline.
-- Training/evaluation configuration checks.
-- Retrieval gallery construction.
-- Bidirectional retrieval engine.
-- Model Service.
-- Retrieval Service.
-- FastAPI endpoints.
-- Automated test suite.
+1. **Dataset preparation:** Flickr30k images and captions are cleaned, split at image level, and converted into model-ready tensors and token IDs.
+2. **Feature extraction:** The image encoder extracts visual features, while the selected text encoder processes caption tokens and captures their sequential or contextual information.
+3. **Shared representation learning:** Projection layers map both modalities into a common 512-dimensional embedding space.
+4. **Model optimization:** Contrastive objectives, including Multi-Positive InfoNCE, margin-based contrastive loss, and triplet loss, are available to train image and text representations. An optional matching branch estimates image–caption compatibility.
+5. **Retrieval evaluation:** The evaluation pipeline measures ranking quality in text-to-image and image-to-text directions using Recall@K and other retrieval metrics.
+6. **Gallery creation:** Image and caption embeddings are precomputed and stored with image names and captions for efficient search.
+7. **Application serving:** The FastAPI backend loads a compatible trained checkpoint and retrieval gallery, converts incoming text or images into embeddings, runs similarity search, and formats ranked results.
 
-### Further Research and Development
+## Deployment Notes
 
-- Complete and compare all planned training experiments.
-- Improve retrieval performance through systematic experimentation.
-- Run multi-seed experiments.
-- Complete five-fold cross-validation.
-- Compare contrastive and matching-loss configurations.
-- Perform ablation studies.
-- Evaluate final performance on the held-out test set.
-- Conduct retrieval error analysis.
-- Compare computational cost across architectures.
-- Explore FAISS for large-scale retrieval optimization.
-- Integrate the backend with a user-facing website or application.
+Training code and application serving are separate. The API loads an existing TensorFlow checkpoint; it does not start model training when a user sends a search request.
 
-Implementation status describes the current code and tested components; it does not imply that every planned experiment or final benchmark has been completed.
+Dataset files, trained checkpoints, and generated retrieval galleries are not included as ordinary source files in the repository. They must be prepared or generated separately. The selected model checkpoint, vocabulary, preprocessing configuration, and retrieval gallery must be compatible with one another.
+
+The default gallery is built from the development data (training and validation images) and excludes the held-out test split. For a final performance report, evaluate the selected model on the held-out test split using the project's evaluation protocol; do not use test results for model selection.
 
 ---
 

@@ -130,6 +130,19 @@ class Phase5BackboneAndNegativeTests(unittest.TestCase):
         second = loss_fn(images, captions, training=False)
         self.assertAlmostEqual(float(first.numpy()), float(second.numpy()), 7)
 
+    def test_step_budget_configuration(self):
+        config = TrainingConfig(
+            max_train_steps_per_epoch=250,
+            max_validation_steps=100,
+        )
+        self.assertEqual(config.max_train_steps_per_epoch, 250)
+        self.assertEqual(config.max_validation_steps, 100)
+
+        for field in ("max_train_steps_per_epoch", "max_validation_steps"):
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError):
+                    TrainingConfig(**{field: 0})
+
     def test_invalid_negative_strategy_rejected(self):
         with self.assertRaises(ValueError):
             TrainingConfig(negative_sampling_strategy="unknown")
