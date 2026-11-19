@@ -246,13 +246,13 @@ def search_by_text(request: TextSearchRequest):
 
 @app.post("/search/image", tags=["Retrieval"], summary="Retrieve captions from an uploaded image", response_model=SearchResponse)
 async def search_by_image(
-    file: UploadFile = File(..., description="PNG, JPEG, or WEBP image; maximum 10 MB by default."),
+    file: UploadFile = File(..., description="PNG, JPEG, WEBP, or BMP image; maximum 10 MB by default."),
     top_k: int = Query(default=DEFAULT_TOP_K, ge=1, le=MAX_TOP_K),
     model: str | None = Query(default=None, description="Optional model id from GET /models."),
 ):
     _require_service(model)
-    if file.content_type not in {"image/jpeg", "image/png", "image/webp"}:
-        raise HTTPException(status_code=415, detail="Unsupported image type. Upload JPEG, PNG, or WEBP.")
+    if file.content_type not in {"image/jpeg", "image/png", "image/webp", "image/bmp", "image/x-ms-bmp"}:
+        raise HTTPException(status_code=415, detail="Unsupported image type. Upload JPEG, PNG, WEBP, or BMP.")
     try:
         image_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
         if not image_bytes:
