@@ -393,13 +393,13 @@ Open `http://localhost:3000`. The backend must be running and healthy for live r
 
 A PySide6 desktop client is available for both retrieval directions. It connects to the same FastAPI inference service as the website.
 
-Install the optional desktop dependencies separately from the core training/backend environment:
+All Python dependencies, including the desktop GUI dependency, are installed from the single root requirements file:
 
 ```bash
-python -m pip install -r requirements-desktop.txt
+python -m pip install -r requirements.txt
 ```
 
-`requirements-desktop.txt` contains only the PySide6 GUI dependency and `python-dotenv`; the API, TensorFlow, and model dependencies remain in `requirements.txt`.
+PySide6 is included in the same environment as the backend and training packages.
 
 Start the backend as described below, then launch the desktop app from the repository root:
 
@@ -417,7 +417,7 @@ The desktop client supports:
 - Ranked result cards with similarity scores and gallery image previews.
 - Session-only search history with a clear-history action.
 
-Install its optional dependencies separately with `python -m pip install -r requirements-desktop.txt`, then run `python app/desktop/main.py` from the repository root. Search history is held in memory only and is cleared when the application closes. The desktop app is an inference client; model loading and retrieval are handled by the backend. See [Desktop Setup Guide](app/desktop/README.md).
+Install dependencies once with `python -m pip install -r requirements.txt`, then run `python app/desktop/main.py` from the repository root. Search history is held in memory only and is cleared when the application closes. The desktop app is an inference client; model loading and retrieval are handled by the backend. See [Desktop Setup Guide](app/desktop/README.md).
 
 ---
 
@@ -748,7 +748,7 @@ python -m pytest -v src/training/
 python -m pytest -v app/backend/
 ```
 
-The commands above exercise the automated unit/integration tests without intentionally launching a full training run. Run the desktop tests separately only after installing `requirements-desktop.txt` and the platform's Qt runtime libraries; on headless Linux, use `QT_QPA_PLATFORM=offscreen`.
+The commands above exercise the automated unit/integration tests without intentionally launching a full training run. Run the desktop UI tests with `QT_QPA_PLATFORM=offscreen python -m pytest app/desktop/test_desktop_ui.py -v`; on headless Linux, this uses Qt's offscreen platform.
 
 These tests validate code behavior. Tests that use mock model services, synthetic data, or synthetic galleries do not measure retrieval quality. A separate end-to-end evaluation with a trained checkpoint, matching vocabulary, and real gallery is required.
 
