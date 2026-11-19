@@ -77,6 +77,7 @@ export default function Home() {
           <a href="#explore" className="transition hover:text-[#7770e8]">Explore</a>
           <a href="#how-it-works" className="transition hover:text-[#7770e8]">How it works</a>
           <Link href="/compare" className="transition hover:text-[#7770e8]">Model insights</Link>
+          <Link href="/about" className="transition hover:text-[#7770e8]">About</Link>
         </nav>
         <div className="flex items-center gap-3">
           <span className="hidden items-center gap-2 rounded-full border border-[#e7e6df] bg-white/80 px-3 py-2 text-[10px] font-bold text-[#777b88] sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-[#e5a34b]" /> DEVELOPMENT PREVIEW</span>
@@ -84,7 +85,7 @@ export default function Home() {
           <a href="#explore" className="hidden items-center gap-2 rounded-full bg-[#242943] px-5 py-3 text-xs font-bold text-white transition hover:bg-[#7770e8] sm:flex">Try it now <ArrowUpRight size={14}/></a>
         </div>
       </header>
-      {mobileOpen && <nav className="relative z-20 mx-5 mb-3 flex flex-col gap-4 rounded-2xl border border-[#e9e7df] bg-white p-5 text-sm font-semibold md:hidden"><a href="#explore" onClick={() => setMobileOpen(false)}>Explore</a><a href="#how-it-works" onClick={() => setMobileOpen(false)}>How it works</a><Link href="/compare">Model insights</Link></nav>}
+      {mobileOpen && <nav className="relative z-20 mx-5 mb-3 flex flex-col gap-4 rounded-2xl border border-[#e9e7df] bg-white p-5 text-sm font-semibold md:hidden"><a href="#explore" onClick={() => setMobileOpen(false)}>Explore</a><a href="#how-it-works" onClick={() => setMobileOpen(false)}>How it works</a><Link href="/compare" onClick={() => setMobileOpen(false)}>Model insights</Link><Link href="/about" onClick={() => setMobileOpen(false)}>About</Link></nav>}
 
       <section className="relative z-10 mx-auto grid max-w-[1440px] items-center gap-12 px-5 pb-16 pt-10 sm:px-8 md:pt-16 lg:grid-cols-[1.02fr_0.98fr] lg:px-14 lg:pb-24">
         <div className="relative z-10">
