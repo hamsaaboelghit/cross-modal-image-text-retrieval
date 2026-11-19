@@ -285,7 +285,7 @@ class Flickr30kDataset:
 
         if shuffle:
             dataset = dataset.shuffle(
-                buffer_size=len(self),
+                buffer_size=min(len(self), 512),
                 seed=seed,
                 reshuffle_each_iteration=True,
             )
