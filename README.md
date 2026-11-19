@@ -21,6 +21,7 @@ The project explores different neural network architectures, attention mechanism
 - [Training and Loss Functions](#training-and-loss-functions)
 - [Evaluation](#evaluation)
 - [Retrieval System](#retrieval-system)
+- [Website Application](#website-application)
 - [FastAPI Backend](#fastapi-backend)
 - [Desktop Application](#desktop-application)
 - [Installation](#installation)
@@ -372,15 +373,33 @@ python -m src.retrieval.build_gallery
 
 ---
 
+## Website Application
+
+A Next.js website is available for both retrieval directions. It connects to the FastAPI service and provides text/image query input, model discovery, Top-K selection, ranked results, similarity scores, loading/error states, and model insights from saved evaluation metrics. A minimum-similarity control can filter the displayed results without changing the backend ranking.
+
+Configure the frontend API URL in `app/web/.env.local` (copy `app/web/.env.local.example`) using `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000`, then start it from the web directory:
+
+```bash
+cd app/web
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The backend must be running and healthy for live retrieval.
+
+---
+
 ## Desktop Application
 
 A PySide6 desktop client is available for both retrieval directions. It connects to the same FastAPI inference service as the website.
 
-Install the optional desktop dependencies:
+Install the optional desktop dependencies separately from the core training/backend environment:
 
 ```bash
 python -m pip install -r requirements-desktop.txt
 ```
+
+`requirements-desktop.txt` contains only the PySide6 GUI dependency and `python-dotenv`; the API, TensorFlow, and model dependencies remain in `requirements.txt`.
 
 Start the backend as described below, then launch the desktop app from the repository root:
 
@@ -451,7 +470,7 @@ Parameters:
 
 ### Configuration and Model Selection
 
-Configure the checkpoint, vocabulary, gallery, image directory, CORS origins, and upload limit using environment variables. See the root `.env.example` and [Backend Deployment Guide](app/backend/README.md).
+Configure the model type, checkpoint directory/kind, vocabulary, gallery output/input path, image directory, CORS origins, upload limit, query length, Top-K limits, and metrics path using environment variables. Copy the root `.env.example` to `.env` and edit the values for your local artifacts. `VISIONMATCH_GALLERY_PATH` is used by both the gallery builder and API; relative paths are resolved from the repository root. See the root `.env.example` and [Backend Deployment Guide](app/backend/README.md).
 
 A running API process serves one configured model. The optional `model` request field validates that selection; it does not hot-swap models. Multiple architectures can be exposed through separate API processes with matching checkpoints and galleries.
 
@@ -601,7 +620,7 @@ After configuring `.env` and preparing the dataset:
 python -m src.retrieval.build_gallery
 ```
 
-The gallery is generated from the configured model and development split. It must match the selected checkpoint and vocabulary.
+The gallery is generated from the configured model and development split at `VISIONMATCH_GALLERY_PATH` (default: `results/retrieval_gallery_fold1/gallery.npz`). New gallery metadata includes SHA-256 fingerprints of the checkpoint shards and vocabulary. The API rejects galleries with missing or mismatched fingerprints, so rebuild the gallery whenever the selected checkpoint or vocabulary changes. Build it only after selecting the final trained model; the held-out test split remains excluded.
 
 ### 3. Start the Backend
 
@@ -609,7 +628,7 @@ The gallery is generated from the configured model and development split. It mus
 python -m uvicorn app.backend.main:app --reload --env-file .env
 ```
 
-The backend starts at `http://127.0.0.1:8000`.
+The backend starts at `http://127.0.0.1:8000`. Check `GET /health` before opening the website or desktop client; a healthy API requires a loaded checkpoint and a gallery whose checkpoint/vocabulary fingerprints match.
 
 ### 4. Open API Documentation
 
@@ -637,6 +656,7 @@ For backend endpoint details, request/response formats, and deployment configura
 cross-modal-image-text-retrieval/
 │
 ├── app/
+│   ├── desktop/
 │   ├── backend/
 │   │   ├── main.py
 │   │   ├── model_service.py
@@ -705,7 +725,7 @@ cross-modal-image-text-retrieval/
 
 ## Testing
 
-The repository includes automated tests for data preprocessing, model components, training utilities, retrieval metrics, gallery handling, and FastAPI services.
+The repository includes automated tests for data preprocessing, model components, training utilities, retrieval metrics, gallery handling, FastAPI services, and a separate optional desktop UI smoke test.
 
 Run the focused test groups from the project root:
 
@@ -718,7 +738,7 @@ python -m pytest -v src/training/
 python -m pytest -v app/backend/
 ```
 
-The commands above exercise the automated unit/integration tests without intentionally launching a full training run. Run the desktop tests separately only after installing `requirements-desktop.txt`.
+The commands above exercise the automated unit/integration tests without intentionally launching a full training run. Run the desktop tests separately only after installing `requirements-desktop.txt` and the platform's Qt runtime libraries; on headless Linux, use `QT_QPA_PLATFORM=offscreen`.
 
 These tests validate code behavior. Tests that use mock model services, synthetic data, or synthetic galleries do not measure retrieval quality. A separate end-to-end evaluation with a trained checkpoint, matching vocabulary, and real gallery is required.
 
