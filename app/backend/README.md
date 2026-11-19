@@ -22,6 +22,7 @@ Interactive API documentation is available at `http://localhost:8000/docs`; the 
 - `VISIONMATCH_VOCAB_PATH`: vocabulary JSON used by the selected model.
 - `VISIONMATCH_GALLERY_PATH`: matching `gallery.npz` generated for the same model, vocabulary, fold, and embedding space.
 - `VISIONMATCH_IMAGE_DIR`: directory containing the Flickr30k image files used by the gallery.
+- `VISIONMATCH_METRICS_PATH`: evaluation-summary JSON file or a directory containing per-experiment `retrieval_metrics.json` files (default: `results/experiments`).
 - `VISIONMATCH_MAX_UPLOAD_BYTES`: maximum image upload size (default 10 MiB).
 - `VISIONMATCH_CORS_ORIGINS`: comma-separated allowed frontend origins.
 
