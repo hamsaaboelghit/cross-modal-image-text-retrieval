@@ -6,6 +6,8 @@ VisionMatch AI is a deep learning project that learns a shared embedding space f
 
 The project explores different neural network architectures, attention mechanisms, and contrastive learning techniques for bidirectional image–text retrieval.
 
+> **Experimental status (November 2026):** The software pipeline is implemented and its dataset, model, evaluation, training, retrieval, backend, and website checks have been exercised locally. This does **not** mean retrieval quality is satisfactory. Current architecture results are preliminary and uneven; a short Phase 5 pilot reported validation Mean Recall of 0.0007. A controlled, reproducible comparison and final held-out test evaluation are still required. Do not interpret a working search interface or a loaded checkpoint as evidence of accurate retrieval.
+
 ---
 
 ## Table of Contents
@@ -275,6 +277,14 @@ These values describe the initial baseline experiment configuration. Other exper
 
 The evaluation pipeline measures retrieval quality in both directions.
 
+### Current model-quality status
+
+The committed architecture-comparison report is preliminary: the LSTM results came from an earlier run, the newer GRU/Transformer/Cross-Modal Attention runs used one seed and five epochs, and the simple baseline was not included in that comparison. A later short Phase 5 `data_reference` pilot (one epoch, 50 training steps per epoch, batch size 4) reported validation Mean Recall **0.0007**. This is a diagnostic pilot, not a final benchmark, and it indicates that the current model quality needs investigation before the project can claim successful retrieval performance.
+
+The website and API have also been smoke-tested with a locally loaded Baseline checkpoint and gallery. Both retrieval directions return results, but manual inspection found that relevance is weak. This is a functional integration result only, not an accuracy result.
+
+Next AI work should verify checkpoint-to-gallery compatibility and embedding behavior, establish a reproducible baseline, compare selected encoders under identical data/training/evaluation settings, and repeat the selected configurations across at least three seeds. Keep the held-out test split untouched until all model and hyperparameter choices are finalized.
+
 ### Evaluation Metrics
 
 - **Recall@1:** Percentage of queries whose relevant result appears at rank 1.
@@ -500,8 +510,8 @@ pip install -r requirements.txt
 
 ### Main Dependencies
 
-- Python 3.11–3.12
-- TensorFlow 2.16.2–2.21.0 (see the supported range in requirements.txt; GPU support depends on the OS/WSL CUDA setup)
+- Python 3.11 or 3.12
+- TensorFlow 2.16.2–2.21.x (the exact allowed range is defined in requirements.txt; GPU availability depends on the operating system and CUDA/cuDNN setup)
 - Keras
 - NumPy
 - Pandas
@@ -697,19 +707,20 @@ cross-modal-image-text-retrieval/
 
 The repository includes automated tests for data preprocessing, model components, training utilities, retrieval metrics, gallery handling, and FastAPI services.
 
-Run the test suite from the project root:
+Run the focused test groups from the project root:
 
 ```bash
-python -m pytest -v
+python -m pytest -v src/data/
+python -m pytest -v src/models/
+python -m pytest -v src/evaluation/
+python -m pytest -v src/retrieval/
+python -m pytest -v src/training/
+python -m pytest -v app/backend/
 ```
 
-Backend-focused tests can be run separately:
+The commands above exercise the automated unit/integration tests without intentionally launching a full training run. Run the desktop tests separately only after installing `requirements-desktop.txt`.
 
-```bash
-python -m pytest app/backend/test_main.py app/backend/test_retrieval_service.py -v
-```
-
-These tests cover API and service behavior. Tests that use mock model services or synthetic galleries validate software contracts; they do not measure retrieval quality or replace an end-to-end test with a trained checkpoint and real gallery.
+These tests validate code behavior. Tests that use mock model services, synthetic data, or synthetic galleries do not measure retrieval quality. A separate end-to-end evaluation with a trained checkpoint, matching vocabulary, and real gallery is required.
 
 ---
 
