@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QComboBox,
     QScrollArea,
+    QDialog,
+    QListWidget,
 )
 
 
@@ -106,6 +108,24 @@ class RetrievalWorker(QThread):
             self.failed.emit(str(error))
 
 
+class HealthWorker(QThread):
+    checked = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, api_base):
+        super().__init__()
+        self.api_base = api_base.rstrip("/")
+
+    def run(self):
+        try:
+            request = urllib.request.Request(f"{self.api_base}/health", method="GET")
+            with urllib.request.urlopen(request, timeout=8) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            self.checked.emit(payload)
+        except Exception as error:
+            self.failed.emit(str(error))
+
+
 class MainWindow(QMainWindow):
 
     def __init__(self):
@@ -116,6 +136,8 @@ class MainWindow(QMainWindow):
         self.api_base = os.getenv("VISIONMATCH_API_URL", "http://127.0.0.1:8000").rstrip("/")
         self.model_type = os.getenv("VISIONMATCH_MODEL_TYPE", "baseline").strip().lower()
         self.search_worker = None
+        self.health_worker = None
+        self.search_history = []
 
         self.setWindowTitle("VisionMatch AI | Cross-Modal Retrieval")
         self.resize(1440, 900)
@@ -154,6 +176,7 @@ class MainWindow(QMainWindow):
         """)
 
         self.build_ui()
+        self.refresh_api_status()
 
     # -----------------------------------------------------
     # Main Layout
@@ -400,18 +423,13 @@ class MainWindow(QMainWindow):
         layout.addLayout(title_layout)
         layout.addStretch()
 
-        status = QLabel(f"●  API: {self.api_base}")
-        status.setStyleSheet("""
-            color: #A47728;
-            background-color: #FFFAF0;
-            border: 1px solid #F1DCAE;
-            border-radius: 14px;
-            padding: 9px 13px;
-            font-size: 11px;
-            font-weight: bold;
-        """)
-
-        layout.addWidget(status)
+        self.status_label = QLabel("●  Checking API...")
+        self.status_label.setStyleSheet("color: #A47728; background: #FFFAF0; border: 1px solid #F1DCAE; border-radius: 14px; padding: 9px 13px; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self.status_label)
+        refresh_button = QPushButton("Refresh")
+        refresh_button.setStyleSheet("background: #F0EFFF; color: #6258E8;")
+        refresh_button.clicked.connect(self.refresh_api_status)
+        layout.addWidget(refresh_button)
 
         return header
 
@@ -1000,7 +1018,12 @@ class MainWindow(QMainWindow):
         )
         self.search_worker.succeeded.connect(self.on_search_success)
         self.search_worker.failed.connect(self.on_search_failure)
+        self.search_worker.finished.connect(self._search_finished)
         self.search_worker.start()
+
+    def _search_finished(self):
+        self.search_btn.setEnabled(True)
+        self.search_btn.setText("⌕  Search  →")
 
     def clear_results(self, message):
         while self.results_layout.count():
@@ -1015,12 +1038,17 @@ class MainWindow(QMainWindow):
         self.results_layout.addWidget(label)
 
     def on_search_success(self, payload):
-        self.search_btn.setEnabled(True)
-        self.search_btn.setText("⌕  Search  →")
         results = payload.get("results") or []
         self.clear_results(
             f"{len(results)} result(s) · {payload.get('elapsed_ms', 0):.1f} ms · {payload.get('model', self.model_type)}"
         )
+        self.search_history.insert(0, {
+            "mode": payload.get("mode", self.current_mode),
+            "query": payload.get("query") or payload.get("filename") or "Image search",
+            "count": len(results),
+            "elapsed_ms": payload.get("elapsed_ms", 0),
+            "model": payload.get("model", self.model_type),
+        })
         for item in results[:int(self.top_k_combo.currentText())]:
             kind = item.get("type", "result")
             value = item.get("caption") or item.get("image_id") or item.get("result") or "Matching item"
@@ -1053,19 +1081,67 @@ class MainWindow(QMainWindow):
     # -----------------------------------------------------
 
     def show_history(self):
-
-        QMessageBox.information(
-            self,
-            "Search History",
-            "Search history will be available after backend integration."
-        )
+        dialog = QDialog(self)
+        dialog.setWindowTitle("VisionMatch AI · Search History")
+        dialog.resize(620, 440)
+        layout = QVBoxLayout(dialog)
+        heading = QLabel("Recent searches from this session")
+        heading.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(heading)
+        entries = QListWidget()
+        for record in self.search_history:
+            mode = "Text → Image" if record["mode"] == "text_to_image" else "Image → Text"
+            entries.addItem(f'{mode} · {record["query"]} · {record["count"]} result(s)')
+        if not self.search_history:
+            entries.addItem("No searches yet.")
+        layout.addWidget(entries)
+        clear_button = QPushButton("Clear history")
+        clear_button.clicked.connect(lambda: (self.search_history.clear(), entries.clear(), entries.addItem("History cleared.")))
+        layout.addWidget(clear_button)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        dialog.exec()
 
     def show_about(self):
-
         QMessageBox.information(
             self,
             "About VisionMatch AI",
-            "VisionMatch AI is a cross-modal image-text retrieval "
-            "system powered by deep learning.\n\n"
-            "It supports Text-to-Image and Image-to-Text retrieval."
+            "VisionMatch AI is a cross-modal image-text retrieval system "
+            "built with deep learning and the Flickr30k dataset.\n\n"
+            "Text-to-Image retrieves relevant images from a natural-language query.\n"
+            "Image-to-Text retrieves matching captions from an uploaded image.\n\n"
+            "The desktop application is an inference client. The FastAPI backend "
+            "handles model loading and retrieval; training is performed separately."
         )
+
+    def refresh_api_status(self):
+        if self.health_worker and self.health_worker.isRunning():
+            return
+        self.status_label.setText("●  Checking API...")
+        self.health_worker = HealthWorker(self.api_base)
+        self.health_worker.checked.connect(self._on_health_success)
+        self.health_worker.failed.connect(self._on_health_failure)
+        self.health_worker.start()
+
+    def _on_health_success(self, payload):
+        if payload.get("model_loaded"):
+            model = payload.get("model_type", self.model_type)
+            self.status_label.setText(f"●  Ready · {model}")
+            self.status_label.setStyleSheet("color: #237A4B; background: #ECF8F0; border: 1px solid #C9E9D3; border-radius: 14px; padding: 9px 13px; font-size: 11px; font-weight: bold;")
+            self.status_label.setToolTip("API and retrieval model are ready.")
+        else:
+            self.status_label.setText("●  API online · model unavailable")
+            self.status_label.setStyleSheet("color: #A36A1B; background: #FFF8E9; border: 1px solid #F0DCA8; border-radius: 14px; padding: 9px 13px; font-size: 11px; font-weight: bold;")
+            self.status_label.setToolTip(payload.get("startup_error") or "Inference model is not ready.")
+
+    def _on_health_failure(self, error):
+        self.status_label.setText("●  API offline")
+        self.status_label.setStyleSheet("color: #A33D3D; background: #FFF1F1; border: 1px solid #F0D0D0; border-radius: 14px; padding: 9px 13px; font-size: 11px; font-weight: bold;")
+        self.status_label.setToolTip(str(error))
+
+    def closeEvent(self, event):
+        for worker in (self.search_worker, self.health_worker):
+            if worker and worker.isRunning():
+                worker.wait(3000)
+        super().closeEvent(event)
