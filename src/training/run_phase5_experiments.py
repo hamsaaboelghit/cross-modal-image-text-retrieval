@@ -44,7 +44,7 @@ def build_experiments():
 
 def metadata(all_experiments, epochs, batch_size, train_steps_per_epoch, validation_steps):
     return {
-        "schema_version": 2, "fold": FOLD, "seed": SEED,
+        "schema_version": 3, "fold": FOLD, "seed": SEED,
         "epochs": epochs, "batch_size": batch_size,
         "train_steps_per_epoch": train_steps_per_epoch,
         "validation_steps": validation_steps, "learning_rate": LR,
@@ -101,7 +101,9 @@ def save_results(rows):
     OUT.mkdir(parents=True, exist_ok=True)
     atomic_json(OUT / "phase5_results.json", rows)
     fields = [
-        "experiment", "status", "loss_type", "caption_count",
+        "experiment", "status", "batch_size", "epochs_requested",
+        "train_steps_per_epoch", "validation_steps",
+        "validation_loss_is_partial", "loss_type", "caption_count",
         "image_augmentation", "negative_sampling_strategy", "pretrained",
         "train_all_backbone", "epochs_completed", "best_val_retrieval_loss",
         "final_val_retrieval_loss", "training_time_minutes",
@@ -176,6 +178,10 @@ def run_all(
             val_losses = history.get("val_retrieval_loss") or history["val_loss"]
             row = {
                 "experiment": name, "status": "completed",
+                "batch_size": batch_size, "epochs_requested": epochs,
+                "train_steps_per_epoch": train_steps_per_epoch,
+                "validation_steps": validation_steps,
+                "validation_loss_is_partial": True,
                 "loss_type": config["loss_type"],
                 "caption_count": config["caption_count"],
                 "image_augmentation": config["image_augmentation"],
@@ -220,7 +226,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument(
         "--train-steps-per-epoch", type=int, default=250,
-        help="Training batches per epoch; use 0 only if you change the code (must be positive).",
+        help="Training batches per epoch (default: 250).",
     )
     parser.add_argument(
         "--validation-steps", type=int, default=100,
