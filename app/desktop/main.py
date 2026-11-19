@@ -4,7 +4,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QFont
 
-from ui.main_window import MainWindow
+from .ui.main_window import MainWindow
 
 
 def main():
