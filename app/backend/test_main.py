@@ -333,3 +333,36 @@ def test_search_repeated_requests_remain_available(client):
             json={"query": "A dog"},
         )
         assert response.status_code == 200
+
+
+def test_metrics_endpoint_aggregates_saved_evaluation_files(client, tmp_path, monkeypatch):
+    import json
+
+    experiment_dir = tmp_path / "lstm_fold1_seed42"
+    experiment_dir.mkdir()
+    metrics = {
+        "experiment": "lstm_fold1_seed42",
+        "model_type": "ResNet50-LSTM",
+        "encoder_type": "lstm",
+        "text_to_image": {"recall@1": 0.12, "recall@5": 0.34, "recall@10": 0.56},
+        "image_to_text": {"recall@1": 0.15, "recall@5": 0.37, "recall@10": 0.59},
+        "num_images": 5086,
+        "embedding_dim": 512,
+        "test_set_used": False,
+    }
+    (experiment_dir / "retrieval_metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+    monkeypatch.setattr(main, "METRICS_PATH", tmp_path)
+
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert len(payload["models"]) == 1
+    assert payload["models"][0]["text_to_image"]["recall@5"] == pytest.approx(0.34)
+
+
+def test_metrics_endpoint_reports_missing_results(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(main, "METRICS_PATH", tmp_path / "missing")
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert response.json()["available"] is False
