@@ -17,7 +17,7 @@ from src.training.experiment_runner import run_experiment
 
 ROOT = Path(__file__).resolve().parents[2]
 FOLD, SEED = 1, 42
-BATCH_SIZE, LR, OUTPUT_DIM, DROPOUT = 8, 1e-4, 512, 0.1
+LR, OUTPUT_DIM, DROPOUT = 1e-4, 512, 0.1
 OUT = ROOT / "results" / "phase5_data_strategy"
 VOCAB = ROOT / "data" / "processed" / "flickr30k" / "vocabularies" / "fold_1_vocab.json"
 
@@ -42,13 +42,13 @@ def build_experiments():
     return [{"name": name, **base, **changes} for name, changes in specs]
 
 
-def metadata(experiments, epochs):
+def metadata(all_experiments, epochs, batch_size):
     return {
-        "schema_version": 1, "fold": FOLD, "seed": SEED,
-        "epochs": epochs, "batch_size": BATCH_SIZE, "learning_rate": LR,
+        "schema_version": 2, "fold": FOLD, "seed": SEED,
+        "epochs": epochs, "batch_size": batch_size, "learning_rate": LR,
         "output_dim": OUTPUT_DIM, "dropout": DROPOUT,
         "selection_split": "validation", "test_set_used": False,
-        "experiments": experiments,
+        "experiments": all_experiments,
     }
 
 
@@ -61,7 +61,7 @@ def atomic_json(path, value):
     temp.replace(path)
 
 
-def evaluate_checkpoint(config):
+def evaluate_checkpoint(config, batch_size):
     vocab = load_vocabulary(VOCAB)
     model = CrossModalRetrievalModel(
         vocab_size=len(vocab), encoder_type="lstm", embedding_dim=300,
@@ -86,7 +86,7 @@ def evaluate_checkpoint(config):
 
     val = Flickr30kDataset(FOLD, "validation")
     val_ds = val.as_dataset(
-        batch_size=BATCH_SIZE, shuffle=False, drop_remainder=False, seed=SEED
+        batch_size=batch_size, shuffle=False, drop_remainder=False, seed=SEED
     )
     metrics = RetrievalEvaluator(
         model, query_batch_size=32, candidate_chunk_size=8192, ks=(1, 5, 10)
@@ -117,10 +117,10 @@ def save_results(rows):
     temp.replace(path)
 
 
-def run_all(experiments, epochs, resume, overwrite):
+def run_all(experiments, all_experiments, epochs, batch_size, resume, overwrite):
     OUT.mkdir(parents=True, exist_ok=True)
     meta_path, results_path = OUT / "phase5_run_metadata.json", OUT / "phase5_results.json"
-    expected = metadata(experiments, epochs)
+    expected = metadata(all_experiments, epochs, batch_size)
     if resume:
         if not meta_path.is_file() or not results_path.is_file():
             raise FileNotFoundError("Resume needs existing Phase 5 metadata and results.")
@@ -156,12 +156,12 @@ def run_all(experiments, epochs, resume, overwrite):
                 caption_count=config["caption_count"],
                 image_augmentation=config["image_augmentation"],
                 negative_sampling_strategy=config["negative_sampling_strategy"],
-                epochs=epochs, batch_size=BATCH_SIZE, seed=SEED, fold=FOLD,
+                epochs=epochs, batch_size=batch_size, seed=SEED, fold=FOLD,
                 learning_rate=LR, loss_type=config["loss_type"],
                 margin=config["margin"], output_dim=OUTPUT_DIM,
                 dropout=DROPOUT, log_dir="runs/phase5_data_strategy",
             )
-            metrics = evaluate_checkpoint(config)
+            metrics = evaluate_checkpoint(config, batch_size)
             t2i, i2t = metrics["text_to_image"], metrics["image_to_text"]
             val_losses = history.get("val_retrieval_loss") or history["val_loss"]
             row = {
@@ -208,6 +208,10 @@ def run_all(experiments, epochs, resume, overwrite):
 def main():
     parser = argparse.ArgumentParser(description="Phase 5 controlled data and initialization experiments.")
     parser.add_argument("--epochs", type=int, default=5)
+    parser.add_argument(
+        "--batch-size", type=int, default=4,
+        help="Per-device batch size. Default 4 is conservative for GPUs with 6 GB VRAM.",
+    )
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--only", nargs="+")
     parser.add_argument("--resume", action="store_true")
@@ -215,10 +219,13 @@ def main():
     args = parser.parse_args()
     if args.epochs <= 0:
         parser.error("--epochs must be positive.")
+    if args.batch_size <= 0:
+        parser.error("--batch-size must be positive.")
     if args.resume and args.overwrite:
         parser.error("--resume and --overwrite cannot be combined.")
 
-    experiments = build_experiments()
+    all_experiments = build_experiments()
+    experiments = all_experiments
     if args.only:
         requested, known = set(args.only), {x["name"] for x in experiments}
         if requested - known:
@@ -237,7 +244,10 @@ def main():
     if args.list:
         print("List-only mode. No training was started.")
         return
-    run_all(experiments, args.epochs, args.resume, args.overwrite)
+    run_all(
+        experiments, all_experiments, args.epochs, args.batch_size,
+        args.resume, args.overwrite,
+    )
 
 
 if __name__ == "__main__":
