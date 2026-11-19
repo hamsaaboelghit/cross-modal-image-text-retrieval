@@ -26,7 +26,7 @@ MAX_QUERY_CHARS = int(os.getenv("VISIONMATCH_MAX_QUERY_CHARS", "1000"))
 DEFAULT_TOP_K = int(os.getenv("VISIONMATCH_DEFAULT_TOP_K", "5"))
 MAX_TOP_K = int(os.getenv("VISIONMATCH_MAX_TOP_K", "50"))
 IMAGE_DIR = Path(os.getenv("VISIONMATCH_IMAGE_DIR", str(PROJECT_ROOT / "data/raw/flickr30k-images"))).expanduser()
-METRICS_PATH = Path(os.getenv("VISIONMATCH_METRICS_PATH", str(PROJECT_ROOT / "results/evaluation/summary.json"))).expanduser()
+METRICS_PATH = Path(os.getenv("VISIONMATCH_METRICS_PATH", str(PROJECT_ROOT / "results/experiments"))).expanduser()
 MODEL_TYPE = os.getenv("VISIONMATCH_MODEL_TYPE", "baseline").strip().lower()
 MODEL_LABELS = {
     "baseline": "CNN + mean-pooled text baseline",
@@ -291,6 +291,44 @@ def get_metrics():
     path = METRICS_PATH
     if not path.is_absolute():
         path = PROJECT_ROOT / path
+
+    # The evaluator writes one retrieval_metrics.json per experiment.
+    # A directory path aggregates all available experiment artifacts.
+    if path.is_dir():
+        metric_files = sorted(path.glob("*/retrieval_metrics.json"))
+        models = []
+        for metric_file in metric_files:
+            try:
+                with metric_file.open("r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            except (OSError, json.JSONDecodeError):
+                logger.exception("Could not read evaluation file: %s", metric_file)
+                continue
+            models.append({
+                "name": payload.get("model_type") or payload.get("experiment") or metric_file.parent.name,
+                "experiment": payload.get("experiment", metric_file.parent.name),
+                "model_type": payload.get("model_type"),
+                "encoder_type": payload.get("encoder_type"),
+                "text_to_image": payload.get("text_to_image", {}),
+                "image_to_text": payload.get("image_to_text", {}),
+                "num_images": payload.get("num_images"),
+                "embedding_dim": payload.get("embedding_dim"),
+                "test_set_used": payload.get("test_set_used"),
+                "source": str(metric_file.relative_to(PROJECT_ROOT)),
+            })
+        if not models:
+            return {
+                "available": False,
+                "message": "No retrieval_metrics.json files were found in the configured evaluation directory.",
+                "source": str(path),
+                "models": [],
+            }
+        return {
+            "available": True,
+            "source": str(path),
+            "models": models,
+        }
+
     if not path.is_file():
         return {
             "available": False,
@@ -304,4 +342,17 @@ def get_metrics():
     except (OSError, json.JSONDecodeError) as exc:
         logger.exception("Could not read evaluation metrics")
         raise HTTPException(status_code=500, detail="Saved evaluation metrics are invalid.") from exc
+    if isinstance(payload, dict) and "models" not in payload and "text_to_image" in payload:
+        payload = {"models": [{
+            "name": payload.get("model_type") or payload.get("experiment") or path.stem,
+            "experiment": payload.get("experiment"),
+            "model_type": payload.get("model_type"),
+            "encoder_type": payload.get("encoder_type"),
+            "text_to_image": payload.get("text_to_image", {}),
+            "image_to_text": payload.get("image_to_text", {}),
+            "num_images": payload.get("num_images"),
+            "embedding_dim": payload.get("embedding_dim"),
+            "test_set_used": payload.get("test_set_used"),
+            "source": path.name,
+        }]}
     return {"available": True, "source": path.name, **payload}
