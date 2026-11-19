@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 from PIL import Image
+from dotenv import load_dotenv
 
 from src.data.vocabulary import load_vocabulary
 from src.models.full_model import CrossModalRetrievalModel
@@ -13,6 +14,7 @@ from src.models.baseline_model import BaselineRetrievalModel
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(PROJECT_ROOT / ".env")
 
 MODEL_TYPE = os.getenv(
     "VISIONMATCH_MODEL_TYPE",
