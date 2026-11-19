@@ -307,3 +307,29 @@ def test_model_selection_rejects_unloaded_model(client):
         json={"query": "A dog", "model": "lstm"},
     )
     assert response.status_code == 400
+
+
+def test_image_search_rejects_oversized_upload(client, monkeypatch):
+    monkeypatch.setattr(main, "MAX_UPLOAD_BYTES", 8)
+    response = client.post(
+        "/search/image",
+        files={"file": ("large.png", b"x" * 9, "image/png")},
+    )
+    assert response.status_code == 413
+
+
+def test_text_search_rejects_unknown_model(client):
+    response = client.post(
+        "/search/text",
+        json={"query": "A dog", "model": "not-a-model"},
+    )
+    assert response.status_code == 400
+
+
+def test_search_repeated_requests_remain_available(client):
+    for _ in range(5):
+        response = client.post(
+            "/search/text",
+            json={"query": "A dog"},
+        )
+        assert response.status_code == 200
