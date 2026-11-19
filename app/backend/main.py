@@ -314,7 +314,7 @@ def get_metrics():
                 "num_images": payload.get("num_images"),
                 "embedding_dim": payload.get("embedding_dim"),
                 "test_set_used": payload.get("test_set_used"),
-                "source": str(metric_file.relative_to(PROJECT_ROOT)),
+                "source": str(metric_file),
             })
         if not models:
             return {
