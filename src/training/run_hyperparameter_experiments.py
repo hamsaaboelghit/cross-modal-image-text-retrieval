@@ -22,6 +22,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 FOLD = 1
 SEED = 42
 EVAL_BATCH_SIZE = 8
+MODEL_TYPE = "baseline"
+RUN_SCHEMA_VERSION = 1
 
 VOCAB_PATH = (
     PROJECT_ROOT
@@ -129,6 +131,86 @@ def validate_experiment_design(experiments):
 
     print("[PASS] One-factor-at-a-time experiment design.")
     print(f"[PASS] Total experiments: {len(experiments)}")
+
+
+def build_run_metadata(experiments, epochs):
+    """Return the exact settings required to safely resume a run."""
+    return {
+        "schema_version": RUN_SCHEMA_VERSION,
+        "model_type": MODEL_TYPE,
+        "fold": FOLD,
+        "seed": SEED,
+        "epochs": epochs,
+        "selection_split": "validation",
+        "experiments": [
+            {key: experiment[key] for key in (
+                "name",
+                "changed_parameter",
+                "changed_value",
+                "learning_rate",
+                "batch_size",
+                "output_dim",
+                "dropout",
+                "temperature",
+            )}
+            for experiment in experiments
+        ],
+    }
+
+
+def validate_resume_metadata(existing, expected):
+    """Reject resume attempts that would mix incompatible runs."""
+    if existing != expected:
+        raise ValueError(
+            "Existing hyperparameter run metadata does not match this "
+            "command. Keep the original --epochs/--only settings, or use "
+            "--overwrite to intentionally start a new run."
+        )
+
+
+def load_resume_rows(metadata, expected):
+    metadata_path = OUTPUT_DIR / "hyperparameter_run_metadata.json"
+    results_path = OUTPUT_DIR / "hyperparameter_results.json"
+
+    if not metadata_path.is_file() or not results_path.is_file():
+        raise FileNotFoundError(
+            "Cannot resume: both hyperparameter_run_metadata.json and "
+            "hyperparameter_results.json must exist."
+        )
+
+    with metadata_path.open("r", encoding="utf-8") as file:
+        existing_metadata = json.load(file)
+
+    validate_resume_metadata(existing_metadata, expected)
+
+    with results_path.open("r", encoding="utf-8") as file:
+        rows = json.load(file)
+
+    if not isinstance(rows, list):
+        raise ValueError("Existing hyperparameter results must be a JSON list.")
+
+    expected_names = {item["name"] for item in metadata["experiments"]}
+    unexpected_names = {
+        row.get("experiment")
+        for row in rows
+        if row.get("experiment") not in expected_names
+    }
+    if unexpected_names:
+        raise ValueError(
+            "Existing results contain experiments outside this run: "
+            f"{sorted(unexpected_names)}"
+        )
+
+    return rows
+
+
+def atomic_write_json(path, payload):
+    """Write JSON through a temporary sibling file to avoid partial results."""
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    with temporary_path.open("w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=4, ensure_ascii=False)
+        file.flush()
+    temporary_path.replace(path)
 
 
 def find_best_checkpoint(experiment_name):
@@ -266,27 +348,50 @@ def evaluate_experiment(experiment):
 
 
 def get_best_training_losses(history):
+    # Keep the total objective for diagnostics, but report retrieval loss
+    # separately because it is the shared objective used for validation
+    # checkpoint selection across the project's model architectures.
     train_losses = history.get("train_loss", [])
-    val_losses = history.get("val_loss", [])
+    train_retrieval_losses = history.get(
+        "train_retrieval_loss",
+        train_losses,
+    )
+    val_retrieval_losses = history.get(
+        "val_retrieval_loss",
+        history.get("val_loss", []),
+    )
 
-    if not train_losses or not val_losses:
+    if not train_losses or not val_retrieval_losses:
         raise ValueError(
             "Training history does not contain train/validation losses."
         )
 
-    if len(train_losses) != len(val_losses):
+    if not (
+        len(train_losses)
+        == len(train_retrieval_losses)
+        == len(val_retrieval_losses)
+    ):
         raise ValueError(
-            "Train and validation history lengths do not match."
+            "Training objective, retrieval, and validation history "
+            "lengths do not match."
         )
 
-    best_epoch_index = int(np.argmin(val_losses))
+    best_epoch_index = int(np.argmin(val_retrieval_losses))
 
     return {
         "best_epoch": best_epoch_index + 1,
         "best_train_loss": float(train_losses[best_epoch_index]),
-        "best_val_loss": float(val_losses[best_epoch_index]),
+        "best_train_retrieval_loss": float(
+            train_retrieval_losses[best_epoch_index]
+        ),
+        "best_val_loss": float(val_retrieval_losses[best_epoch_index]),
+        "best_val_retrieval_loss": float(
+            val_retrieval_losses[best_epoch_index]
+        ),
         "final_train_loss": float(train_losses[-1]),
-        "final_val_loss": float(val_losses[-1]),
+        "final_train_retrieval_loss": float(train_retrieval_losses[-1]),
+        "final_val_loss": float(val_retrieval_losses[-1]),
+        "final_val_retrieval_loss": float(val_retrieval_losses[-1]),
         "epochs_completed": len(train_losses),
     }
 
@@ -329,16 +434,7 @@ def save_results(rows):
     json_path = OUTPUT_DIR / "hyperparameter_results.json"
     csv_path = OUTPUT_DIR / "hyperparameter_comparison.csv"
 
-    with json_path.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            rows,
-            file,
-            indent=4,
-            ensure_ascii=False,
-        )
+    atomic_write_json(json_path, rows)
 
     columns = [
         "experiment",
@@ -359,9 +455,13 @@ def save_results(rows):
         "epochs_completed",
         "best_epoch",
         "best_train_loss",
+        "best_train_retrieval_loss",
         "best_val_loss",
+        "best_val_retrieval_loss",
         "final_train_loss",
+        "final_train_retrieval_loss",
         "final_val_loss",
+        "final_val_retrieval_loss",
         "training_time_minutes",
         "text_to_image_r1",
         "text_to_image_r5",
@@ -383,7 +483,8 @@ def save_results(rows):
         "error",
     ]
 
-    with csv_path.open(
+    temporary_csv_path = csv_path.with_suffix(csv_path.suffix + ".tmp")
+    with temporary_csv_path.open(
         "w",
         newline="",
         encoding="utf-8-sig",
@@ -395,6 +496,8 @@ def save_results(rows):
         )
         writer.writeheader()
         writer.writerows(rows)
+        file.flush()
+    temporary_csv_path.replace(csv_path)
 
     print("\nResults saved:")
     print(csv_path)
@@ -422,7 +525,7 @@ def save_best_configuration(rows):
         successful,
         key=lambda row: (
             row["overall_mean_recall"],
-            -row["best_val_loss"],
+            -row.get("best_val_retrieval_loss", row["best_val_loss"]),
         ),
     )
 
@@ -444,7 +547,10 @@ def save_best_configuration(rows):
         "best_validation_metrics": {
             "overall_mean_recall": best["overall_mean_recall"],
             "overall_mrr": best["overall_mrr"],
-            "best_val_loss": best["best_val_loss"],
+            "best_val_retrieval_loss": best.get(
+                "best_val_retrieval_loss",
+                best["best_val_loss"],
+            ),
         },
     }
 
@@ -599,10 +705,49 @@ def create_plots(rows):
     print("\nPlots saved in:", plot_dir)
 
 
-def run_all(experiments, epochs=5):
-    rows = []
+def run_all(experiments, epochs=5, resume=False, overwrite=False):
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    metadata = build_run_metadata(experiments, epochs)
+    metadata_path = OUTPUT_DIR / "hyperparameter_run_metadata.json"
+    results_path = OUTPUT_DIR / "hyperparameter_results.json"
+
+    if resume:
+        rows = load_resume_rows(metadata, metadata)
+        print(
+            f"[RESUME] Loaded {len(rows)} saved experiment records."
+        )
+    else:
+        existing_outputs = metadata_path.exists() or results_path.exists()
+        if existing_outputs and not overwrite:
+            raise FileExistsError(
+                "Previous hyperparameter results already exist. Use "
+                "--resume to continue the same run, or --overwrite to "
+                "start a fresh run and replace its result files."
+            )
+        rows = []
+        atomic_write_json(metadata_path, metadata)
+
+    completed_names = {
+        row["experiment"]
+        for row in rows
+        if row.get("status") == "completed"
+        and "overall_mean_recall" in row
+    }
 
     for index, experiment in enumerate(experiments, start=1):
+        if experiment["name"] in completed_names:
+            print(
+                f"[SKIP] {experiment['name']} already completed "
+                "and has validation metrics."
+            )
+            continue
+
+        # Replace an earlier failed/incomplete record if this experiment
+        # is being retried during a resumed run.
+        rows = [
+            row for row in rows
+            if row.get("experiment") != experiment["name"]
+        ]
         print("\n\n")
         print("#" * 75)
         print(
@@ -616,7 +761,7 @@ def run_all(experiments, epochs=5):
         try:
             history = run_experiment(
                 experiment_name=experiment["name"],
-                model_type="baseline",
+                model_type=MODEL_TYPE,
                 epochs=epochs,
                 batch_size=experiment["batch_size"],
                 seed=SEED,
@@ -734,10 +879,31 @@ def main():
         help="List experiment configurations without training.",
     )
 
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "Resume the exact previous run, skipping completed experiments "
+            "and retrying failed/incomplete ones."
+        ),
+    )
+
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help=(
+            "Start a fresh run and replace existing result files. "
+            "Cannot be combined with --resume."
+        ),
+    )
+
     args = parser.parse_args()
 
     if args.epochs <= 0:
         parser.error("--epochs must be positive.")
+
+    if args.resume and args.overwrite:
+        parser.error("--resume and --overwrite cannot be used together.")
 
     experiments = build_experiments()
     validate_experiment_design(experiments)
@@ -764,6 +930,9 @@ def main():
 
     print("\nEXPERIMENT PLAN")
     print("=" * 90)
+    print("Model scope: BaselineRetrievalModel only")
+    print("Selection: Validation overall mean recall; retrieval loss tie-break")
+    print("Test split: not used for tuning or selection")
 
     for experiment in experiments:
         print(
@@ -791,6 +960,8 @@ def main():
     run_all(
         experiments=experiments,
         epochs=args.epochs,
+        resume=args.resume,
+        overwrite=args.overwrite,
     )
 
 
