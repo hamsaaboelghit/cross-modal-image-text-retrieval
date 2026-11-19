@@ -33,6 +33,7 @@ export default function Home() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [topK, setTopK] = useState(5);
+  const [minSimilarity, setMinSimilarity] = useState(-1);
   const [model, setModel] = useState("baseline");
   const [models, setModels] = useState<Array<{id:string;name:string;loaded:boolean}>>([]);
   const [results, setResults] = useState<SearchResponse | null>(null);
@@ -134,6 +135,10 @@ export default function Home() {
     return item.image_url.startsWith("http") ? item.image_url : `${API_BASE}${item.image_url}`;
   }
 
+  const filteredResults = (results?.results || []).filter(
+    item => Number(item.similarity ?? 0) >= minSimilarity
+  );
+
   return (
     <main className="min-h-screen bg-[#f7f7f4] text-[#171b2b]">
       <header className="mx-auto flex max-w-[1280px] items-center justify-between px-5 py-6 sm:px-8">
@@ -159,7 +164,7 @@ export default function Home() {
               <div className="mt-6 flex flex-wrap justify-end gap-3"><button onClick={clear} className="rounded-full border border-[#e5e3dc] bg-white px-5 py-3 text-xs font-bold">Clear</button><button onClick={search} disabled={loading} className="inline-flex items-center gap-2 rounded-full bg-[#7770e8] px-6 py-3 text-xs font-extrabold text-white disabled:opacity-60">{loading?<><LoaderCircle size={15} className="animate-spin"/>Searching...</>:<>Search <ArrowRight size={15}/></>}</button></div>
             </div>
           </div>
-          {results && <div className="mt-9"><div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="text-xl font-black">Search results</h3><p className="mt-1 text-xs text-[#858895]">{results.count} results · {results.model} · {results.elapsed_ms} ms</p></div></div>{results.results.length===0 ? <p className="mt-5 rounded-xl bg-[#f7f7f4] p-6 text-sm text-[#858895]">No matches were returned.</p> : <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{results.results.map((item,index)=><article key={`${item.rank}-${item.image_id||index}`} className="overflow-hidden rounded-2xl border border-[#e9e7df] bg-white">{mode==="text" && imageUrl(item) ? <Image src={imageUrl(item)} alt={item.image_id||"Retrieved Flickr30k image"} width={640} height={360} unoptimized className="h-48 w-full object-cover"/> : <div className="flex h-48 items-center justify-center bg-[#f1efff] text-[#7770e8]"><ImageIcon size={42}/></div>}<div className="p-4"><div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-[#999ba5]"><span>Rank #{item.rank||index+1}</span><span>Similarity {Number(item.similarity ?? 0).toFixed(4)}</span></div><p className="mt-3 break-words text-sm font-bold">{mode==="image"?resultCaption(item):(item.image_id||"Retrieved image")}</p></div></article>)}</div>}</div>}
+          {results && <div className="mt-9"><div className="flex flex-wrap items-end justify-between gap-3"><div><h3 className="text-xl font-black">Search results</h3><p className="mt-1 text-xs text-[#858895]">{filteredResults.length} shown / {results.count} retrieved · {results.model} · {results.elapsed_ms} ms</p></div><label className="text-xs font-bold">Minimum similarity<select value={minSimilarity} onChange={e=>setMinSimilarity(Number(e.target.value))} className="ml-2 rounded-xl border border-[#e5e3dc] bg-white p-2.5 text-xs"><option value={-1}>All scores</option><option value={0}>0.00</option><option value={0.2}>0.20</option><option value={0.4}>0.40</option><option value={0.6}>0.60</option></select></label></div>{filteredResults.length===0 ? <p className="mt-5 rounded-xl bg-[#f7f7f4] p-6 text-sm text-[#858895]">No retrieved results meet this similarity threshold.</p> : <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{filteredResults.map((item,index)=><article key={`${item.rank}-${item.image_id||index}`} className="overflow-hidden rounded-2xl border border-[#e9e7df] bg-white">{mode==="text" && imageUrl(item) ? <Image src={imageUrl(item)} alt={item.image_id||"Retrieved Flickr30k image"} width={640} height={360} unoptimized className="h-48 w-full object-cover"/> : <div className="flex h-48 items-center justify-center bg-[#f1efff] text-[#7770e8]"><ImageIcon size={42}/></div>}<div className="p-4"><div className="flex items-center justify-between text-[10px] font-extrabold uppercase tracking-wider text-[#999ba5]"><span>Rank #{item.rank||index+1}</span><span>Similarity {Number(item.similarity ?? 0).toFixed(4)}</span></div><p className="mt-3 break-words text-sm font-bold">{mode==="image"?resultCaption(item):(item.image_id||"Retrieved image")}</p></div></article>)}</div>}</div>}
         </div>
       </section>
       <footer className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-4 px-5 py-8 text-[10px] text-[#9698a2] sm:px-8"><span>VisionMatch AI · Flickr30k research project</span><Link href="/compare" className="inline-flex items-center gap-2 font-bold text-[#7770e8]">Model insights <ArrowUpRight size={13}/></Link></footer>
