@@ -608,3 +608,24 @@ A validation evaluation was launched for `checkpoints/experiments/gru_phase5_res
 The recorded training configuration is one epoch, batch size 1, AdamW (learning rate 0.0001, weight decay 0.0001), InfoNCE temperature 0.07, matching-loss weight 0.2, up to 200 training steps and 100 validation steps, with pretrained ResNet50. The supplied log showed validation feature extraction reaching 4,800 images, but it ended before the evaluator printed its final metrics. Consequently, this evaluation remains **in progress / output not yet verified**. No Recall@K, Mean Recall, MRR, Median Rank, final query count, or completed JSON artifact is claimed here.
 
 The Keras warnings about projection layers discarding sequence-mask metadata should be investigated; they did not stop the checkpoint restore or the extraction progress shown. oneDNN and CPU feature notices are informational runtime messages. The checkpoint validation loss is not a substitute for retrieval-ranking metrics. Update this record only after the process exits and the JSON file is inspected. The held-out test set must remain unused until final model selection.
+
+## Completed Phase 5 GRU validation evaluation — 20 November 2026
+
+The evaluation for `checkpoints/experiments/gru_phase5_resnet50_pretrained/best` completed and saved `results/evaluation_gru_resnet50.json`. The evaluator restored `best_model-1` and extracted validation embeddings for 5,086 images. The log explicitly confirms: **Held-out test split used: NO**.
+
+The checkpoint identifies fold 1, seed 42, epoch 0 (zero-based), stored validation loss 0.8051351488. The recorded configuration is a full model with GRU text encoder and pretrained ResNet50, one epoch, batch size 1, AdamW (learning rate 0.0001, weight decay 0.0001), InfoNCE temperature 0.07, matching-loss weight 0.2, maximum 200 training steps and 100 validation steps.
+
+### Final validation retrieval metrics
+
+| Direction | Recall@1 | Recall@5 | Recall@10 | Mean Recall | Median Rank | MRR |
+|---|---:|---:|---:|---:|---:|---:|
+| Text-to-Image | 0.0197% | 0.1101% | 0.2320% | 0.1206% | 2,539 | 0.001861 |
+| Image-to-Text | 0.0000% | 0.0983% | 0.1966% | 0.0983% | 3,921.5 | 0.001512 |
+
+Text-to-Image: 25,430 caption queries, 5,086 image candidates. Image-to-Text: 5,086 image queries, 25,430 caption candidates.
+
+**Analysis:** These retrieval scores are extremely low. In particular, Recall@10 remains below 0.25% in both directions, while median ranks are 2,539 and 3,921.5. The result aligns with the poor relevance observed in manual demo searches. The checkpoint restoration and evaluation pipeline work, but the current model does not yet provide useful retrieval quality. The stored validation loss (0.8051351488) must not be interpreted as evidence of good ranking performance.
+
+Keras warned that `projection_network` and `text_projection` discard sequence-mask metadata. Evaluation completed despite these warnings, but they are a priority for investigation because padding-mask information may be lost downstream. oneDNN and CPU feature messages are informational runtime notices. The output JSON was saved at `results/evaluation_gru_resnet50.json`. The held-out test set remains untouched.
+
+The earlier progress-only note for this run is superseded by these completed metrics. Do not add these numbers to a final test-results table; they are validation-only results from one short run and one seed.
