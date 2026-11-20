@@ -130,3 +130,21 @@ For both text-to-image and image-to-text, save a reproducible sample of queries,
 ### Reporting metrics and query groups
 
 Because this is a ranking task, ordinary per-class classification accuracy is not directly applicable. If category labels exist, report retrieval metrics by category; otherwise define reproducible query groups (e.g., people, animals, actions, attributes, spatial relations), provide group sizes, and report group-wise retrieval metrics. Do not invent categories or examples.
+
+
+## Phase 5 GRU checkpoint evaluation progress — 20 November 2026
+
+A validation evaluation was launched for the Phase 5 pretrained-ResNet50 GRU checkpoint:
+
+- Checkpoint directory: `checkpoints/experiments/gru_phase5_resnet50_pretrained/best`
+- Resolved checkpoint: `best_model-1`
+- Evaluator architecture arguments: `model-type full`, `encoder-type gru`, `pretrained`
+- Output target: `results/evaluation_gru_resnet50.json`
+- Fold / seed: 1 / 42
+- Checkpoint epoch (zero-based): 0
+- Stored checkpoint validation loss: **0.8051351488**
+- Recorded training configuration: one epoch, batch size 1, AdamW, learning rate 0.0001, weight decay 0.0001, InfoNCE temperature 0.07, matching-loss weight 0.2, maximum 200 training steps and 100 validation steps.
+
+The supplied console log confirms successful model-weight restoration and validation embedding extraction through 4,800 images. It stops before the final evaluation summary; therefore the run is **not yet confirmed complete**. Retrieval-ranking metrics (T2I/I2T Recall@1/5/10, Mean Recall, MRR, Median Rank), final evaluated counts, and the JSON output contents remain **Pending**. Do not add the checkpoint validation loss to the retrieval-results table or infer retrieval quality from it.
+
+Keras reported that projection layers discard the attached sequence mask. The warning did not prevent the logged extraction progress, but it remains a modeling issue to investigate. The held-out test split is not reported as used in this evaluation.
