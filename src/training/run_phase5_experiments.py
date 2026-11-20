@@ -49,9 +49,12 @@ def main():
         "dropout":DROPOUT,"temperature":TEMP,"selection_split":"validation","test_set_used":False}
     mp,rp=OUT/"phase5_run_metadata.json",OUT/"phase5_results.json"
     if a.resume:
-        if not mp.exists() or not rp.exists(): raise FileNotFoundError("Phase 5 resume files missing.")
+        if not mp.exists(): raise FileNotFoundError(f"Phase 5 metadata missing: {mp}")
         if json.loads(mp.read_text())!=meta: raise ValueError("Phase 5 settings differ.")
-        rows=json.loads(rp.read_text())
+        # The process may have been stopped after saving a checkpoint but before
+        # the first results JSON was written. In that case start an empty result
+        # list; existing checkpoints are detected and evaluated without retraining.
+        rows=json.loads(rp.read_text()) if rp.exists() else []
     else:
         if mp.exists() or rp.exists(): raise FileExistsError("Phase 5 outputs exist; use --resume.")
         rows=[]; atomic_json(mp,meta)
