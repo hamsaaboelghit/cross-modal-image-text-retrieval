@@ -169,3 +169,23 @@ Text-to-Image used 25,430 caption queries and 5,086 image candidates. Image-to-T
 **Interpretation:** Both directions show extremely weak retrieval performance (Recall@10 below 0.25%). This supports the observed demo behavior where returned images/captions are often unrelated to the query. This run establishes successful checkpoint loading and metric computation, not a successful retrieval model. The stored validation loss is not a ranking metric and should not be used to claim model quality.
 
 The Keras sequence-mask warnings persisted: projection layers discard the attached mask. Evaluation completed, but mask handling requires investigation. The earlier in-progress entry is superseded by these completed results. These values are validation-only, from one seed and a short training run; they are not comparable as a final fair benchmark and must not be presented as held-out test results.
+
+## Phase 5 GRU data-strategy experiments — completed
+
+Five short data-strategy runs were completed on fold 1 with seed 42. All used one epoch, up to 200 training steps and 100 validation steps, AdamW (learning rate 0.0001, weight decay 0.0001), InfoNCE temperature 0.07, and CPU execution. The held-out test split was not used. These are pilot comparisons, not final statistically reliable model-selection results.
+
+| Experiment | Captions/image | Image augmentation | ResNet initialization / strategy | Training objective | Validation retrieval loss | Training time |
+|---|---:|---|---|---:|---:|---:|
+| Reference | 5 | None | Pretrained, frozen backbone | 0.819112 | 0.805117 | 7.56 min |
+| One caption | 1 | None | Pretrained, frozen backbone | 0.000000 | 0.847462 | 7.66 min |
+| Light augmentation | 5 | Light | Pretrained, frozen backbone | 0.819278 | 0.805119 | 7.92 min |
+| ResNet50 pretrained | 5 | None | Pretrained; last-block fine-tuning configured | 0.819242 | 0.805135 | 8.85 min |
+| ResNet50 scratch | 5 | None | Random initialization; last-block trainable setting | 0.816970 | 0.805103 | 11.71 min |
+
+### Interpretation and limitations
+
+The validation retrieval losses are tightly clustered for the four five-caption runs (approximately 0.8051). The scratch run has the numerically lowest loss (0.805103), but the difference from the reference (0.805117) is only 0.000014 and cannot establish a meaningful advantage from a single seed and one epoch. Light augmentation and the pretrained fine-tuning variant also show no meaningful improvement over the reference in this limited run.
+
+The one-caption run is clearly worse on validation loss (0.847462). Its reported training objective and training retrieval loss are exactly 0.000000 across the run, which is anomalous for this contrastive retrieval setup. Do not interpret this as perfect training; inspect the one-caption batch construction, positive/negative pair generation, and loss computation before drawing conclusions.
+
+All five experiments still emit Keras warnings that `projection_network` and `text_projection` discard mask metadata. This is a shared implementation concern and should be investigated before further model-quality claims. The Phase 5 results are exploratory, use one seed and one epoch, and must not replace the controlled multi-seed architecture comparison or held-out test evaluation.
