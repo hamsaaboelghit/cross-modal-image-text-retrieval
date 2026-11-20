@@ -28,3 +28,22 @@ button { cursor: pointer; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #d4d3ce; border-radius: 20px; }
 ::-webkit-scrollbar-thumb:hover { background: #aaa9a3; }
+
+
+:focus-visible {
+  outline: 3px solid rgba(119, 112, 232, .55);
+  outline-offset: 3px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
