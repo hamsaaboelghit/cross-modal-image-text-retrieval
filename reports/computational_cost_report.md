@@ -201,3 +201,14 @@ The following items remain to be completed before the computational-cost analysi
 The current measurements provide an initial view of training cost for the GRU, LSTM, and cross-modal attention configurations, as well as supplementary learning-rate and ablation experiments. They suggest that the cross-modal attention configuration requires more training time in the measured setup, although the auxiliary matching loss is an experimental confound.
 
 A complete computational-cost comparison cannot yet be concluded. Inference latency, throughput, parameter counts, saved model sizes, full hardware specifications, and repeated-seed statistics remain to be measured or documented. These values will be added when the corresponding experimental results become available.
+
+
+### 2.4 Phase 5 — GRU data-strategy reference run
+
+A supplementary Phase 5 reference run completed on CPU using GRU, seed 42, Flickr30k fold 1, batch size 1, one epoch, 200 training steps, and 100 validation steps. It used five captions per image, no augmentation, a frozen pretrained ResNet50, AdamW with learning rate 0.0001, and InfoNCE loss (temperature 0.07).
+
+| Configuration | Training time | Training objective | Validation retrieval loss |
+|---|---:|---:|---:|
+| GRU Phase 5 reference | 7.56 min | 0.819112 | 0.805117 |
+
+This is a separate diagnostic configuration and must not be pooled with the batch-size-4, 200-validation-batch three-model comparison. The checkpoint was reused during resume. The evaluation batch size was increased to 4 while retaining all 5,086 validation images; feature extraction was approximately 1,272 batches rather than 5,086 single-image batches. The one-caption Phase 5 run was still in progress in the latest log, so its metrics and runtime remain Pending.
