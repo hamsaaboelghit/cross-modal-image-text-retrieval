@@ -34,8 +34,8 @@ The run used a limited pilot budget rather than full-dataset training. After eac
 | Experiment | Captions per image | Augmentation | ResNet50 initialization / fine-tuning | Validation retrieval loss | Training time | Status |
 |---|---:|---|---|---:|---:|---|
 | `gru_phase5_data_reference` | 5 | None | Pretrained; frozen | Not captured in supplied log excerpt | Reused checkpoint | Completed/reused and evaluated |
-| `gru_phase5_one_caption` | 1 | None | Pretrained; frozen | 0.847462 | 7.66 min | Completed |
-| `gru_phase5_light_augmentation` | 5 | Light | Pretrained; frozen | **0.805119** | 7.92 min | Completed |
+| `gru_phase5_one_caption` | 1 | None | Pretrained; frozen | 0.847462 | Not captured | Completed |
+| `gru_phase5_light_augmentation` | 5 | Light | Pretrained; frozen | **0.805119** | Not captured | Completed |
 | `gru_phase5_resnet50_pretrained` | 5 | None | Pretrained; last block unfrozen | Pending | Pending | Running at latest log snapshot |
 | `gru_phase5_resnet50_scratch` | 5 | None | From scratch; last block unfrozen | Pending | Pending | Not yet run |
 
