@@ -226,3 +226,14 @@ The nine-run comparison is progressing. The following runs have completed under 
 | GRU | 123 | 25.51 min | 2.039485 | 1.826844 |
 
 The seed-123 LSTM run is currently in progress (run 5/9); its final training time and metrics are pending. Seed-123 cross-modal attention and all seed-456 runs are pending. The cross-modal attention run includes an auxiliary matching loss (weight 0.2), unlike the GRU/LSTM runs, so its runtime is for the full configuration and does not isolate attention overhead. The held-out test split was not used. Mean and standard deviation will be calculated only after comparable repeated runs are complete.
+
+
+### 2.5 Phase 5 — one-caption experiment
+
+The GRU one-caption-per-image experiment completed on CPU with seed 42, fold 1, batch size 1, one epoch, 200 training steps, 100 validation batches, AdamW at learning rate 0.0001, InfoNCE temperature 0.07, frozen pretrained ResNet50, and no augmentation.
+
+| Configuration | Training time | Reported training objective | Validation retrieval loss |
+|---|---:|---:|---:|
+| One caption per image | 7.66 min | 0.000000 | 0.847462 |
+
+**Validity warning:** The exactly zero training objective is anomalous given the non-zero validation retrieval loss. The loss and negative-sampling/batch construction must be inspected before this run is treated as a valid training-cost/performance observation or used to draw conclusions about reducing captions per image. Its runtime is recorded as an observed elapsed time, but the run's optimization result is flagged for verification. The light-augmentation run was in progress in the latest log; its final training time and metrics are pending.
