@@ -424,6 +424,14 @@ The current evidence is preliminary. Historical retrieval evaluation indicates s
 
 ---
 
+
+
+### Phase 5 — data strategy and visual-backbone studies (preliminary)
+
+Phase 5 evaluates five GRU configurations on Flickr30k fold 1 (seed 42): (1) reference setup with five captions/image and frozen pretrained ResNet50; (2) one caption/image; (3) light image augmentation; (4) pretrained ResNet50 with its last block unfrozen; and (5) ResNet50 initialized from scratch with its last block trainable. Each run uses one epoch, 200 training steps, batch size 1, and 100 validation steps. The evaluation pipeline was updated to use batch size 4 while retaining the full 5,086-image validation split.
+
+The reference configuration completed with training objective 0.819112, validation retrieval loss 0.805117, and training time 7.56 minutes. Its saved checkpoint was successfully reused during resume, avoiding repeated training; validation feature extraction was then run with the updated evaluation batch size. The one-caption configuration had started training in the latest captured log, but no completed metrics were available at that point. The remaining three configurations and final Phase 5 comparison are **Pending**. These short-budget validation losses are diagnostic and are not directly comparable with the separate three-model architecture comparison because the batch size, step budget, and evaluation configuration differ. Test data was not used.
+
 ## Appendix A — Reporting and reproducibility checklist
 
 - [x] Define T2I and I2T retrieval tasks.
