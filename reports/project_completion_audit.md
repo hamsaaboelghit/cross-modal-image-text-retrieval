@@ -60,13 +60,32 @@ Therefore:
 | Controlled architecture comparison | Partially evidenced; rerun required |
 | Hyperparameter experiments | Scripted; completed results not established |
 | Loss-function comparison | Scripted; completed results not established |
-| Caption-count/augmentation/negative-sampling experiments | Scripted; completed results not established |
-| Pretrained vs. scratch | Scripted; completed results not established |
+| Caption-count/augmentation/negative-sampling experiments | Partially completed in the Phase 5 pilot; see the dated results report below. |
+| Pretrained vs. scratch | In progress; the fine-tuning run had started, while the scratch run was still pending at the latest log snapshot. |
 | Three-seed final comparison | Not verified |
 | Final held-out test evaluation | Not verified |
 | Error analysis and failure examples | Not verified |
 | Training/inference cost and resource analysis | Not verified |
-| Final research conclusions | Not ready |
+| Final research conclusions | Not ready | 
+
+### Phase 5 — Data Strategy and Initialization (interim snapshot: 2026-11-20)
+
+The latest user-provided run log confirms two completed GRU pilot variants with validation retrieval-loss values, plus one reused checkpoint. These are **partial pilot results**, not a completed Phase 5 comparison.
+
+| Experiment | Configuration change | Validation retrieval loss | Training time | Status |
+|---|---|---:|---:|---|
+| `gru_phase5_data_reference` | Five captions; no augmentation; pretrained ResNet50 frozen | Not available in the supplied log excerpt | Reused checkpoint | Evaluated; metric not captured in the excerpt |
+| `gru_phase5_one_caption` | One caption per image | 0.847462 | 7.66 min | Completed |
+| `gru_phase5_light_augmentation` | Five captions; light image augmentation | **0.805119** | 7.92 min | Completed |
+| `gru_phase5_resnet50_pretrained` | Five captions; pretrained ResNet50 with last block unfrozen | Pending | Running at the latest log snapshot | In progress |
+| `gru_phase5_resnet50_scratch` | Five captions; ResNet50 initialized from scratch with last block unfrozen | Pending | Pending | Not yet run |
+
+Pilot execution settings: one epoch, batch size 1, 200 training batches per experiment, up to 100 validation batches, learning rate 1e-4, AdamW, InfoNCE temperature 0.07, seed 42, Fold 1, and CPU execution on native Windows. The validation dataset contains 5,086 images; the training split contains 20,340 images. The test split was not used. The runner also extracted embeddings for a 5,000-image development gallery after completed/reused runs.
+
+The one-caption run printed a training retrieval loss of 0.0000. With batch size 1, in-batch contrastive negatives are absent, so this training-loss value should not be interpreted as evidence of successful optimization. The validation retrieval loss is retained as the reported metric.
+
+Among the two numerical validation losses captured so far, light augmentation is lower (0.805119 versus 0.847462). This is only a provisional observation: the runs are short, use a single seed, and change data strategy; the final ranking must wait for all variants and consistent full evaluation. No held-out test result or final performance claim is made here.
+
 
 ## 4. Backend
 
