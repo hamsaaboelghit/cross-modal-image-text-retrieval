@@ -518,3 +518,84 @@ At the time of this update, the run had entered its first epoch and was filling 
 The Keras warnings state that projection layers do not preserve an attached sequence mask. They are warnings, not fatal errors: the LSTM run continued through training completion and saved both best and latest checkpoints. The warnings should nevertheless be reviewed as a potential modeling concern before finalizing the architecture.
 
 The validation loss of 1.856892 is not a retrieval-ranking metric and cannot by itself establish that LSTM is the best retrieval model. The comparison remains incomplete until all planned runs finish and their validation retrieval metrics are evaluated consistently. The held-out test split remains untouched.
+
+
+---
+
+## 23. Explicit research hypotheses and how they will be tested
+
+The project uses the following hypotheses as testable research claims. None should be described as accepted until the corresponding retrieval-ranking results support it.
+
+**H1 — Sequence encoders versus the lightweight baseline.** Recurrent text encoders (RNN, GRU, or LSTM) are expected to improve bidirectional image–text retrieval over the CNN plus masked-mean text baseline by modeling word order and context. Test by comparing T2I and I2T Recall@1/5/10, Mean Recall, MRR, and Median Rank under a matched split and training budget.
+
+**H2 — GRU versus LSTM.** GRU and LSTM are expected to show different quality/cost trade-offs. Compare the same visual backbone, text preprocessing, objective, batch size, step budget, and seeds; report retrieval metrics and runtime. A lower loss alone is not sufficient evidence of better ranking.
+
+**H3 — Cross-modal attention.** Cross-modal attention is expected to improve retrieval by modeling image–text interactions. Test against a recurrent model with identical data, training schedule, and loss configuration. The existing comparison that enables matching loss only for the attention model is confounded and cannot isolate the effect of attention.
+
+**H4 — Caption diversity and augmentation.** Multiple captions per image and suitable image augmentation may improve robustness and retrieval generalization. Test caption count and augmentation as separate factors, keeping the remaining configuration fixed. The one-caption pilot with a zero training objective must be debugged before drawing conclusions.
+
+**H5 — Pretrained visual features.** Initializing ResNet50 from pretrained weights is expected to be more effective or computationally efficient than training from scratch on the available dataset. Compare under the same data split and a clearly stated fine-tuning policy.
+
+## 24. Experimental controls and statistical reporting
+
+For each final architecture claim, use the same fold, train/validation image split, preprocessing, retrieval candidate pool, evaluation implementation, optimizer budget, and tuning budget. Run at least three random seeds (42, 123, and 456) for every configuration presented as a final comparison. Publish the individual seed values and report mean ± standard deviation for every retrieval metric. If the run settings differ, label the experiments as separate diagnostic studies and do not combine them into one fair ranking.
+
+Use validation data for checkpoint selection and hyperparameter decisions. Keep the held-out test split untouched until the final configuration is fixed; then evaluate it once and report the exact checkpoint and configuration used.
+
+The current controlled-comparison plan covers GRU, LSTM, and Cross-Modal Attention for three seeds. It does not by itself provide a three-seed comparison for the baseline or Transformer. Either include those models under the same protocol or explicitly narrow the scope of the final architecture claim and explain the exclusion.
+
+## 25. Ablation protocol
+
+The following ablations are required to support causal claims:
+
+1. **Attention ablation:** compare LSTM with and without cross-modal attention while keeping the matching-loss setting identical.
+2. **Matching-loss ablation:** compare the same architecture with matching loss disabled/enabled while keeping attention and all other settings identical.
+3. **Caption-count ablation:** compare one versus five captions per image; verify that every batch contains valid positives and negatives and that the loss is finite and non-zero when expected.
+4. **Augmentation ablation:** compare no augmentation with the selected light augmentation under the same training budget.
+5. **Backbone study:** compare pretrained frozen, pretrained fine-tuned, and scratch-initialized ResNet50, documenting which layers are trainable.
+
+For each ablation, report validation retrieval metrics in both directions, training time, and the exact changed factor. Current results for several of these studies remain pending. The previously reported one-caption training objective of 0.000000 is flagged as anomalous and must not be interpreted until the loss/data pipeline is inspected.
+
+## 26. Retrieval metrics, query groups, and error analysis
+
+The primary metrics are Text-to-Image and Image-to-Text Recall@1, Recall@5, Recall@10, Mean Recall, MRR, and Median Rank. Report each seed separately and the mean ± standard deviation. Confidence intervals may additionally be estimated by a documented bootstrap over queries, but the resampling unit and number of replicates must be stated.
+
+Conventional per-class accuracy is not inherently suitable because the task ranks image/caption candidates rather than assigning one class label. If trustworthy category annotations are available, report retrieval metrics by category. Otherwise, define query groups using a reproducible text/tag rule (for example, people, animals, actions, colors, and spatial relations) and report group-wise retrieval metrics with group sizes. Do not imply that these query groups are ground-truth classes.
+
+The final error-analysis sample must contain real model outputs from both retrieval directions. For every sampled query, preserve the query, relevant ground-truth item(s), top-five retrieved candidates, ranks or similarity scores, and a manually reviewed error category: object confusion, action confusion, attribute mismatch, spatial-relation mismatch, omitted object, or semantic mismatch. Report the sample-selection method and category counts. The current error table is a template; its counts and examples remain pending.
+
+## 27. Computational cost and deployment validation
+
+For each final model, report total and trainable parameter counts, checkpoint size, training duration, inference latency and throughput for both retrieval directions, and peak memory when available. Record exact hardware and software: CPU model, GPU model and VRAM (if used), system RAM, operating system, Python, TensorFlow, CUDA/cuDNN versions. State the inference batch size, warm-up iterations, timed repetitions, and whether image/text embeddings are precomputed.
+
+The FastAPI and web interface provide the demo pathway, but the final submission should include an end-to-end validation record using the selected checkpoint and its matching vocabulary/gallery. Verify text-to-image search, image-to-text search, invalid input handling, and that the displayed results correspond to the configured model.
+
+## 28. Updated run status — 20 November 2026
+
+The latest received log supersedes the earlier note that seed-123 LSTM was still running. The run `fair200_20261120_lstm_fold1_seed123` completed on CPU with one epoch, batch size 4, 200 training steps, and 200 validation steps. It used AdamW (learning rate 0.0001, weight decay 0.0001), InfoNCE (temperature 0.07), five captions per image, and a frozen pretrained ResNet50.
+
+| Metric | Result |
+|---|---:|
+| Training objective / retrieval loss | 2.060249 |
+| Validation retrieval loss | 1.856892 |
+| Training time | 22.93 minutes |
+
+Best checkpoint: `checkpoints/experiments/fair200_20261120_lstm_fold1_seed123/best/best_model-1`.
+
+The seed-123 Cross-Modal Attention run had started but had not produced final metrics in the supplied log. The seed-456 runs were still pending in the latest confirmed progress. The supplied log did not report Recall@K, Mean Recall, MRR, or Median Rank for this LSTM run. Do not substitute validation loss for retrieval-ranking metrics.
+
+## 29. Updated completion checklist
+
+- [ ] Complete the three-seed runs for each architecture included in the final comparison.
+- [ ] Include the baseline and Transformer in the controlled comparison, or explicitly limit and justify the scope.
+- [ ] Calculate per-seed T2I/I2T Recall@K, Mean Recall, MRR, Median Rank, and mean ± standard deviation.
+- [ ] Investigate Keras sequence-mask warnings and verify padded tokens cannot affect sequence representations.
+- [ ] Debug and rerun the one-caption experiment with zero reported training objective.
+- [ ] Complete attention-only and matching-loss-only ablations.
+- [ ] Complete caption-count, augmentation, pretrained-vs-scratch, and fine-tuning studies.
+- [ ] Populate the error-analysis table with actual queries and top-five predictions.
+- [ ] Add query-group results or explain the absence of class-wise metrics.
+- [ ] Record parameters, checkpoint size, inference latency/throughput, memory, and exact hardware.
+- [ ] Select the model using validation only and run the held-out test evaluation once.
+- [ ] Validate the live demo end to end with the final selected checkpoint and gallery.
+- [ ] Add plots, galleries, and final reproducibility evidence.
