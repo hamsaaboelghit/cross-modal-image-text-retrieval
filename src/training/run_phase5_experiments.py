@@ -61,25 +61,32 @@ def main():
         if n in completed: print("[SKIP]",n); continue
         start=time.time(); print(f"\nPHASE 5 {i}/5: {n}")
         try:
-            h=run_experiment(experiment_name=n,model_type="full",encoder_type="gru",
-                use_cross_modal_attention=False,pretrained=c["pretrained"],
-                unfreeze_last_block=c["unfreeze_last_block"],train_all_backbone=False,
-                caption_count=c["caption_count"],image_augmentation=c["image_augmentation"],
-                negative_sampling_strategy="random",epochs=1,batch_size=BATCH,seed=SEED,fold=FOLD,
-                learning_rate=LR,temperature=TEMP,loss_type="info_nce",output_dim=OUTPUT_DIM,
-                dropout=DROPOUT,log_dir="runs/phase5_data_strategy",
-                max_train_steps_per_epoch=TRAIN_STEPS,max_validation_steps=VAL_STEPS)
+            best_dir=ROOT/"checkpoints/experiments"/n/"best"
+            existing_checkpoint=tf.train.latest_checkpoint(str(best_dir))
+            if existing_checkpoint:
+                print(f"[REUSE] Found trained checkpoint; skipping training: {existing_checkpoint}")
+                h=None
+            else:
+                h=run_experiment(experiment_name=n,model_type="full",encoder_type="gru",
+                    use_cross_modal_attention=False,pretrained=c["pretrained"],
+                    unfreeze_last_block=c["unfreeze_last_block"],train_all_backbone=False,
+                    caption_count=c["caption_count"],image_augmentation=c["image_augmentation"],
+                    negative_sampling_strategy="random",epochs=1,batch_size=BATCH,seed=SEED,fold=FOLD,
+                    learning_rate=LR,temperature=TEMP,loss_type="info_nce",output_dim=OUTPUT_DIM,
+                    dropout=DROPOUT,log_dir="runs/phase5_data_strategy",
+                    max_train_steps_per_epoch=TRAIN_STEPS,max_validation_steps=VAL_STEPS)
             m=evaluate_full_checkpoint(n,encoder_type="gru",pretrained=c["pretrained"],
                 unfreeze_last_block=c["unfreeze_last_block"],batch_size=EVAL_BATCH_SIZE)
-            losses=h.get("val_retrieval_loss") or h["val_loss"]
+            losses=(h.get("val_retrieval_loss") or h["val_loss"]) if h is not None else []
             rows.append({"experiment":n,"status":"completed","seed":SEED,"batch_size":BATCH,
                 "train_steps":TRAIN_STEPS,"validation_steps":VAL_STEPS,
                 "caption_count":c["caption_count"],"image_augmentation":c["image_augmentation"],
                 "pretrained":c["pretrained"],"unfreeze_last_block":c["unfreeze_last_block"],
-                "best_validation_retrieval_loss":min(losses),
+                "best_validation_retrieval_loss":min(losses) if losses else None,
                 "overall_validation_mean_recall":m["overall_validation_mean_recall"],
                 "overall_validation_mrr":m["overall_validation_mrr"],
-                "training_time_minutes":(time.time()-start)/60,"checkpoint_path":m["checkpoint_path"],
+                "training_time_minutes":(time.time()-start)/60 if h is not None else None,
+                "checkpoint_path":m["checkpoint_path"],
                 "evaluation_split":"validation","test_set_used":False})
         except Exception as e:
             rows.append({"experiment":n,"status":"failed","error":str(e)[:1500]}); traceback.print_exc()
