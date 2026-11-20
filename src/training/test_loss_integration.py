@@ -307,3 +307,30 @@ def test_loss_integration():
 
 if __name__ == "__main__":
     test_loss_integration()
+
+
+def test_infonce_rejects_batch_size_one():
+    """A single image provides no in-batch negatives for InfoNCE."""
+    criterion = MultiPositiveInfoNCELoss(temperature=0.07)
+    images = tf.math.l2_normalize(tf.random.normal((1, 16)), axis=-1)
+    captions = tf.math.l2_normalize(tf.random.normal((1, 2, 16)), axis=-1)
+    try:
+        criterion(images, captions)
+        raise AssertionError("Expected a single-image batch to be rejected.")
+    except tf.errors.InvalidArgumentError:
+        pass
+
+
+def test_infonce_batch_size_four_has_nonzero_finite_loss_and_gradients():
+    """Normal multi-image batches must produce a trainable contrastive loss."""
+    criterion = MultiPositiveInfoNCELoss(temperature=0.07)
+    images = tf.Variable(tf.math.l2_normalize(tf.random.normal((4, 16)), axis=-1))
+    captions = tf.Variable(tf.math.l2_normalize(tf.random.normal((4, 2, 16)), axis=-1))
+    with tf.GradientTape() as tape:
+        loss = criterion(images, captions)
+    gradients = tape.gradient(loss, [images, captions])
+    tf.debugging.assert_all_finite(loss, "InfoNCE loss must be finite.")
+    tf.debugging.assert_positive(loss, "InfoNCE loss must not be zero for random embeddings.")
+    assert all(gradient is not None for gradient in gradients)
+    for gradient in gradients:
+        tf.debugging.assert_all_finite(gradient, "InfoNCE gradients must be finite.")
