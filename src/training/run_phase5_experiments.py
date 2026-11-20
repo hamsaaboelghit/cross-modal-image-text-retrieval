@@ -8,6 +8,7 @@ from src.training.experiment_utils import ROOT, atomic_json, evaluate_full_check
 SEED,FOLD=42,1
 LR,BATCH,OUTPUT_DIM,DROPOUT,TEMP=1e-4,1,512,0.1,0.07
 TRAIN_STEPS,VAL_STEPS=200,100
+EVAL_BATCH_SIZE=4
 OUT=ROOT/"results/gru_phase5_studies"
 
 def build_experiments():
@@ -39,7 +40,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--list",action="store_true"); p.add_argument("--resume",action="store_true")
     a=p.parse_args(); configs=build_experiments()
-    print("PHASE 5 | GRU | seed=42 | batch=1 | train=200 | val=100")
+    print("PHASE 5 | GRU | train_batch=1 | eval_batch=4 | train=200 | val=100")
     for c in configs: print(c["name"],{k:c[k] for k in ("caption_count","image_augmentation","pretrained","unfreeze_last_block")})
     if a.list: print("List-only: no training started."); return
     OUT.mkdir(parents=True,exist_ok=True)
@@ -69,7 +70,7 @@ def main():
                 dropout=DROPOUT,log_dir="runs/phase5_data_strategy",
                 max_train_steps_per_epoch=TRAIN_STEPS,max_validation_steps=VAL_STEPS)
             m=evaluate_full_checkpoint(n,encoder_type="gru",pretrained=c["pretrained"],
-                unfreeze_last_block=c["unfreeze_last_block"],batch_size=BATCH)
+                unfreeze_last_block=c["unfreeze_last_block"],batch_size=EVAL_BATCH_SIZE)
             losses=h.get("val_retrieval_loss") or h["val_loss"]
             rows.append({"experiment":n,"status":"completed","seed":SEED,"batch_size":BATCH,
                 "train_steps":TRAIN_STEPS,"validation_steps":VAL_STEPS,
