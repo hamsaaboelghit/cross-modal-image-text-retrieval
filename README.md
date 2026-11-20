@@ -1246,3 +1246,22 @@ The supplied console log showed validation embedding extraction progressing to *
 Keras emitted warnings that projection layers do not preserve the attached sequence mask. These warnings did not prevent checkpoint restoration or the embedding-extraction batches shown in the supplied log, but padding-mask propagation should be investigated. TensorFlow oneDNN/CPU feature messages are environment/runtime notices and are not, by themselves, evidence of evaluation failure.
 
 Do not confuse the checkpoint's stored validation loss (0.8051351488) with retrieval-ranking performance. Do not claim that the GRU checkpoint is accurate or superior based on this loss. After the process finishes, verify `results/evaluation_gru_resnet50.json`, record the actual metrics and evaluated split, and keep the held-out test split untouched until final model selection.
+
+## Completed Phase 5 GRU validation evaluation — 20 November 2026
+
+The evaluation launched for `checkpoints/experiments/gru_phase5_resnet50_pretrained/best` completed successfully and saved `results/evaluation_gru_resnet50.json`. The evaluator restored `best_model-1`, extracted embeddings for 5,086 validation images, and reported that the held-out test split was **not used**.
+
+**Configuration recorded in the checkpoint:** full model with GRU text encoder and pretrained ResNet50; fold 1, seed 42; epoch 0 (zero-based); batch size 1; one epoch; up to 200 training steps and 100 validation steps; AdamW (learning rate 0.0001, weight decay 0.0001); InfoNCE temperature 0.07; matching-loss weight 0.2. Stored checkpoint validation loss: 0.8051351488.
+
+### Validation retrieval metrics
+
+| Direction | Recall@1 | Recall@5 | Recall@10 | Mean Recall | Median Rank | MRR |
+|---|---:|---:|---:|---:|---:|---:|
+| Text-to-Image | 0.0197% | 0.1101% | 0.2320% | 0.1206% | 2,539 | 0.001861 |
+| Image-to-Text | 0.0000% | 0.0983% | 0.1966% | 0.0983% | 3,921.5 | 0.001512 |
+
+Text-to-Image evaluated 25,430 caption queries against 5,086 image candidates. Image-to-Text evaluated 5,086 image queries against 25,430 caption candidates. These are validation results for this particular short Phase 5 run, not held-out test results.
+
+**Interpretation:** Retrieval quality is very weak: Recall@10 is below 0.25% in both directions and median ranks are high. This is consistent with the unrelated results observed in the demo. The successful evaluation confirms that the checkpoint can be loaded and scored; it does not demonstrate useful retrieval accuracy. Do not present the model as a successful or high-performing retriever.
+
+The evaluator emitted Keras warnings that projection layers discard sequence-mask metadata. These warnings did not stop evaluation, but mask propagation should be investigated because padded tokens may affect text representations. The TensorFlow oneDNN/CPU messages are runtime notices, not the cause of the low scores. The JSON output was saved at `results/evaluation_gru_resnet50.json`. The held-out test split remains unused.
