@@ -59,7 +59,15 @@ class MultiPositiveInfoNCELoss(tf.keras.layers.Layer):
         batch_size = tf.shape(image_embeddings)[0]
         image_dim = tf.shape(image_embeddings)[1]
 
-        tf.debugging.assert_positive(batch_size)
+        tf.debugging.assert_greater(
+            batch_size,
+            1,
+            message=(
+                "InfoNCE requires at least two distinct images per batch "
+                "to provide in-batch negatives. Use batch_size >= 2; "
+                "a batch of one produces a degenerate zero retrieval loss."
+            ),
+        )
         tf.debugging.assert_positive(
             tf.shape(text_embeddings)[1]
         )
@@ -349,21 +357,16 @@ def _run_infonce_tests():
     print("Finite loss and gradients: PASS")
     print("Matching branch gradient flow: PASS")
 
-    # A single-image batch must still produce a valid loss.
-    single_image_loss = criterion(
-        tf.random.normal((1, embedding_dim)),
-        tf.random.normal((1, 2, embedding_dim)),
-        matching_scores=tf.random.normal((1, 2)),
-        negative_matching_scores=tf.random.normal((1, 2)),
-        matching_negatives_valid=False,
-    )
-
-    tf.debugging.assert_all_finite(
-        single_image_loss,
-        "Single-image loss is not finite.",
-    )
-
-    print("Single-image batch handling: PASS")
+    # A one-image batch has no in-batch negatives and must fail loudly
+    # instead of silently returning an apparently perfect zero loss.
+    try:
+        criterion(
+            tf.random.normal((1, embedding_dim)),
+            tf.random.normal((1, 2, embedding_dim)),
+        )
+        raise AssertionError("InfoNCE must reject a batch of one image.")
+    except tf.errors.InvalidArgumentError:
+        print("Degenerate single-image batch rejection: PASS")
 
     # Retrieval-only mode remains supported.
     retrieval_only_loss = criterion(
