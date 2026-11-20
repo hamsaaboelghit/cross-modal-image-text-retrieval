@@ -15,7 +15,8 @@ def main():
     if a.list:
         print("Source:",checkpoint,"| additional train batches: 500 | validation batches: 200"); return
     out=f"checkpoints/experiments/{OUTPUT}"
-    if os.path.exists(out): raise FileExistsError(f"{out} exists. Inspect it; this script never overwrites.")
+    if os.path.exists(out) and any(os.scandir(out)):
+        raise FileExistsError(f"{out} is not empty. Inspect it; this script never overwrites existing files.")
     try:
         run_experiment(experiment_name=OUTPUT,model_type="full",encoder_type="lstm",
             use_cross_modal_attention=True,pretrained=True,unfreeze_last_block=False,
@@ -23,7 +24,7 @@ def main():
             negative_sampling_strategy="random",epochs=2,batch_size=4,seed=42,fold=1,
             learning_rate=1e-4,temperature=0.07,loss_type="info_nce",output_dim=512,dropout=0.1,
             log_dir="runs/deadline_resume500",max_train_steps_per_epoch=500,
-            max_validation_steps=200,resume_from=checkpoint,resume_skip_batches=1000)
+            max_validation_steps=200,resume_from=f"checkpoints/experiments/{SOURCE}",resume_skip_batches=1000)
         metrics=evaluate_full_checkpoint(OUTPUT,encoder_type="lstm",cross_attention=True,
             batch_size=4,checkpoint_subdir="latest")
         print("Resumed Cross-Attention validation Mean Recall:",metrics["overall_validation_mean_recall"])
