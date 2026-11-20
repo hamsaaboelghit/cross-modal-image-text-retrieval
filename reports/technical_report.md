@@ -482,3 +482,39 @@ The GRU one-caption-per-image experiment has completed on CPU. It used seed 42, 
 The one-caption run's reported training objective and retrieval loss are both exactly zero, while its validation retrieval loss is non-zero. This is an anomalous result and must not be interpreted as successful optimization. The loss computation and negative-sampling/batch construction for this configuration require code-level inspection before the experiment can support a conclusion about caption count. The validation-loss difference (0.847462 versus 0.805117) is recorded descriptively only; the one-caption result is flagged for verification.
 
 The light-augmentation experiment (Phase 5 run 3/5) had started but had not produced completed metrics in the latest log. The pretrained fine-tuning and scratch-backbone experiments remain pending. These Phase 5 runs use a different budget and batch size from the main repeated-seed comparison and must remain a separate experiment group.
+
+
+
+## Latest fair-comparison progress — 20 November 2026
+
+This section records the newest run log received after the earlier Phase 5 updates. It is a progress update, not a final benchmark.
+
+### LSTM — fold 1, seed 123 (completed)
+
+The run `fair200_20261120_lstm_fold1_seed123` completed one epoch on CPU. Configuration: batch size 4, 200 training steps, 200 validation steps, AdamW, learning rate 0.0001, weight decay 0.0001, InfoNCE loss with temperature 0.07, pretrained frozen ResNet50, and five captions per image.
+
+| Metric | Result |
+|---|---:|
+| Training objective / retrieval loss | 2.060249 |
+| Validation retrieval loss | **1.856892** |
+| Training time | 22.93 minutes |
+
+Best checkpoint:
+`checkpoints/experiments/fair200_20261120_lstm_fold1_seed123/best/best_model-1`
+
+Latest checkpoint:
+`checkpoints/experiments/fair200_20261120_lstm_fold1_seed123/latest/latest_checkpoint-1`
+
+The test split was not used. The supplied log does not contain Recall@K, Mean Recall, MRR, or Median Rank for this run, so these retrieval metrics remain pending.
+
+### Cross-Modal Attention — fold 1, seed 123 (in progress)
+
+The next controlled-comparison run, `fair200_20261120_cross_attention_fold1_seed123` (run 6/9), started with one epoch, batch size 4, 200 training steps, and 200 validation steps. It uses an LSTM text encoder, Cross-Modal Attention, and an enabled image–caption matching branch with matching-loss weight 0.2. Optimizer: AdamW; learning rate: 0.0001; retrieval loss: InfoNCE; temperature: 0.07. The process is running on CPU.
+
+At the time of this update, the run had entered its first epoch and was filling the TensorFlow shuffle buffer. No final training loss, validation loss, checkpoint, or retrieval metrics were available. All such results remain **Pending**.
+
+### Interpretation and limitations
+
+The Keras warnings state that projection layers do not preserve an attached sequence mask. They are warnings, not fatal errors: the LSTM run continued through training completion and saved both best and latest checkpoints. The warnings should nevertheless be reviewed as a potential modeling concern before finalizing the architecture.
+
+The validation loss of 1.856892 is not a retrieval-ranking metric and cannot by itself establish that LSTM is the best retrieval model. The comparison remains incomplete until all planned runs finish and their validation retrieval metrics are evaluated consistently. The held-out test split remains untouched.
