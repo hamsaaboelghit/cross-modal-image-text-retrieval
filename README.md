@@ -1,3 +1,214 @@
+# VisionMatch AI
+## Cross-Modal Image–Text Retrieval Using Deep Learning
+
+## Project Team
+
+- Hamsa Mustafa Aboelghit
+- Toqaa Mohamed Hassan
+- Mariam Mohamed Abdelkawey
+- Yasmen Abdelaziz Ramadan
+- Basma Sameh Mohamed
+
+## Reproducibility Guide
+
+This section summarizes the information needed to set up, train, evaluate, and run the project. Commands below are intended to be executed from the repository root unless stated otherwise. Dataset files, checkpoints, and generated galleries are local artifacts and are not committed to GitHub.
+
+### 1. Project Title, Team, and Selected Idea
+
+**Title:** VisionMatch AI: Cross-Modal Image–Text Retrieval Using Deep Learning.
+
+**Selected idea:** Build a bidirectional image–text retrieval system that learns a shared semantic embedding space. A user can search for relevant images using a natural-language caption (Text-to-Image) or retrieve captions that describe an uploaded image (Image-to-Text).
+
+### 2. Task Description and Best Result
+
+**Task:** Given a text query, rank the most relevant images; given an image query, rank its matching captions. The project uses Flickr30k, where each image has five human-written captions. Image features are extracted with CNN-based encoders (including ResNet50), while text is encoded using sequence models such as RNN, LSTM, GRU, or Transformer. Both modalities are projected into a shared 512-dimensional space and optimized primarily with contrastive learning.
+
+**Best result:** A final best model/result has **not yet been established**. The controlled three-seed comparison and final held-out test evaluation are still in progress. The following are preliminary validation retrieval-loss results from the first seed of a limited comparison (fold 1, seed 42, one epoch, 200 training steps, batch size 4); they are not final test scores:
+
+| Model | Validation retrieval loss | Training time |
+|---|---:|---:|
+| GRU | 1.898083 | 25.16 min |
+| LSTM | **1.884016** | 22.03 min |
+| Cross-Modal Attention (LSTM) | 1.903820 | 55.62 min |
+
+The LSTM has the lowest validation retrieval loss in this preliminary subset only. This does not establish it as the final winner. The attention model also used an additional matching-loss objective, so its result is not a perfectly isolated attention comparison. Final Recall@K, Mean Recall, MRR, seed mean/standard deviation, and held-out test results: **Pending**.
+
+### 3. Environment Setup
+
+Requirements: Python 3.11 or 3.12, Git, and the packages in `requirements.txt`. TensorFlow GPU acceleration is optional; the recorded experiments so far have used CPU execution.
+
+```bash
+git clone https://github.com/hamsaaboelghit/cross-modal-image-text-retrieval.git
+cd cross-modal-image-text-retrieval
+python -m venv .venv
+```
+
+Activate the environment:
+
+**Windows PowerShell**
+```powershell
+.venv\\Scripts\\Activate.ps1
+```
+
+**Linux / macOS**
+```bash
+source .venv/bin/activate
+```
+
+Install dependencies:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+Copy the environment template when configuring the inference backend:
+
+```bash
+cp .env.example .env
+```
+
+On Windows PowerShell, use `Copy-Item .env.example .env` instead. Edit the paths and model settings in `.env` to match the local dataset, checkpoint, vocabulary, and gallery.
+
+### 4. Dataset Download and Preprocessing
+
+**Dataset:** Flickr30k (31,783 images and 158,915 captions; five captions per image).
+
+The dataset is not hosted in this repository. Obtain the image archive and caption annotations from an authorized Flickr30k distribution/source and comply with its research/educational-use terms. There is no verified one-command public downloader in this repository; therefore, download and extract the archive manually. Place the images in:
+
+```text
+data/raw/flickr30k-images/
+```
+
+Place the caption annotation file(s) in the data location expected by the preprocessing scripts, then verify the exact filenames and paths against the repository's data configuration. The processed dataset is expected under:
+
+```text
+data/processed/flickr30k/
+```
+
+Run the dataset integrity checks:
+
+```bash
+python -m src.data.inspect_dataset
+python -m src.data.validate_captions
+```
+
+Optional full image decoding check (takes longer):
+
+```bash
+python -m src.data.validate_images
+```
+
+The project uses image-level splitting to prevent captions for the same image from crossing train/validation/test splits. Fold 1 is used in the documented experiments. The held-out test split must remain untouched until model selection is complete.
+
+**Preprocessing command sequence:** The exact end-to-end preprocessing CLI sequence and the source annotation filename are **Pending verification against the final dataset directory**. Do not run guessed commands; use the integrity checks above first and follow the scripts/configuration in `src/data/`.
+
+### 5. Training Commands
+
+Run commands from the repository root after dataset preparation. The individual experiment entry points currently committed to the repository are:
+
+**CNN baseline**
+```bash
+python -m src.training.run_baseline_experiment
+```
+
+**ResNet50 + GRU**
+```bash
+python -m src.training.run_gru_experiment
+```
+
+**ResNet50 + LSTM**
+```bash
+python -m src.training.run_lstm_experiment
+```
+
+**ResNet50 + Transformer**
+```bash
+python -m src.training.run_transformer_experiment
+```
+
+**ResNet50 + LSTM + Cross-Modal Attention**
+```bash
+python -m src.training.run_cross_attention_experiment
+```
+
+These individual entry points use their own predefined configurations; do not treat runs with different batch sizes, epochs, step budgets, losses, or seeds as a controlled comparison.
+
+**Controlled three-seed comparison (GRU, LSTM, and Cross-Modal Attention):**
+
+Preview the nine planned runs without starting training:
+
+```bash
+python -m src.training.run_three_models_seed --list
+```
+
+Start the comparison:
+
+```bash
+python -m src.training.run_three_models_seed
+```
+
+Resume an interrupted comparison only when its existing metadata and results files are present:
+
+```bash
+python -m src.training.run_three_models_seed --resume
+```
+
+This comparison uses fold 1, seeds 42/123/456, batch size 4, one epoch, 200 training steps and 200 validation steps per run, pretrained frozen ResNet50, and validation-only model selection. It writes its comparison files under `results/fair_comparison_20261120/`. It does not use the held-out test set.
+
+### 6. Evaluation Command
+
+Evaluate a completed checkpoint only after confirming that its checkpoint directory exists and that the model arguments match the original training configuration. The evaluation command for a completed baseline checkpoint is:
+
+```bash
+python -m src.evaluation.evaluate_checkpoint --checkpoint checkpoints/experiments/baseline_fold1_seed42 --model-type baseline
+```
+
+For sequence-model checkpoints, pass the corresponding architecture settings as documented in the **Evaluating a Completed Checkpoint** section later in this README. Do not copy the baseline command for another architecture or evaluate an unfinished checkpoint.
+
+Report Text-to-Image and Image-to-Text Recall@1, Recall@5, Recall@10, Mean Recall, and MRR. Use validation results for model selection; run the final test evaluation only once the model/configuration is fixed. Per-seed results and mean ± standard deviation across the three seeds: **Pending**.
+
+### 7. Demo Command
+
+The demo consists of the FastAPI inference backend and the Next.js web interface. First configure `.env` with a completed model checkpoint, its matching vocabulary, image directory, and gallery. Build or rebuild the gallery whenever the checkpoint or vocabulary changes:
+
+```bash
+python -m src.retrieval.build_gallery
+```
+
+Start the backend from the repository root:
+
+```bash
+python -m uvicorn app.backend.main:app --reload --env-file .env
+```
+
+In a second terminal, start the website:
+
+```bash
+cd app/web
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000`. The backend API documentation is available at `http://127.0.0.1:8000/docs`. The checkpoint, vocabulary, and gallery must belong to the same model configuration.
+
+### 8. Hardware Used and Expected Runtimes
+
+**Hardware currently documented:** The completed training logs available for this README report CPU-based TensorFlow execution. Exact CPU model, RAM capacity, operating-system version, and any GPU actually used by the final experiments have not yet been fully consolidated; these specifications are **Pending**. Do not assume that an installed GPU was used for training.
+
+**Preliminary measured training runtimes** for the limited seed-42 comparison are listed in Section 2. They are measured durations for the stated one-epoch/200-step configuration, not estimates for full-dataset multi-epoch training. Runtime varies with CPU/GPU, RAM, storage, batch size, and number of steps.
+
+The following cost measurements remain **Pending** for every final model: complete training duration under the final configuration, inference latency/throughput for both retrieval directions, parameter count, checkpoint/model size, and exact hardware/software specifications.
+
+### 9. Credits and External Resources
+
+- **Flickr30k dataset:** Peter Young, Alice Lai, Micah Hodosh, and Julia Hockenmaier, *From image descriptions to visual denotations: New similarity metrics for semantic inference over event descriptions* (2014). Dataset images remain subject to their original copyright and usage terms.
+- **ResNet50:** Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun, *Deep Residual Learning for Image Recognition* (2016). Pretrained weights are obtained through the TensorFlow/Keras application implementation when the pretrained option is enabled.
+- **Frameworks and libraries:** TensorFlow/Keras, NumPy, Pandas, Pillow, OpenCV, FastAPI, Uvicorn, Next.js, and Flutter; see the dependency files and technology sections for versions/configuration.
+- **Project-specific training, evaluation, retrieval, API, and application code:** maintained in this repository. Any additional external implementation or pretrained artifact adopted later must be explicitly credited here with its source, version, and license.
+
+---
+
 
 # VisionMatch AI
 ## Cross-Modal Image–Text Retrieval Using Deep Learning
