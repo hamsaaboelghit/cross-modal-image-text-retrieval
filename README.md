@@ -1167,3 +1167,65 @@ The next run, `fair200_20261120_cross_attention_fold1_seed123`, has started (fai
 - Do not interpret validation retrieval loss as Recall@K or as proof of retrieval quality.
 - Do not declare a winning architecture from this partial run. Complete the remaining runs and compare retrieval metrics under the same evaluation protocol.
 - The training log reports CPU execution. The exact hardware model and RAM remain to be documented.
+
+
+---
+
+## Research hypotheses and final evaluation protocol
+
+The following hypotheses are proposed before final evaluation. They are testable claims, not established findings:
+
+- **H1 — Sequence modeling:** A recurrent text encoder (RNN, GRU, or LSTM) will achieve better bidirectional retrieval than the lightweight CNN/mean-pooling baseline because it models word order and sequential context.
+- **H2 — Recurrent architecture:** LSTM and GRU will differ in retrieval quality and computational cost; the preferred model will be selected using validation Recall@K/Mean Recall/MRR together with runtime, not training loss alone.
+- **H3 — Cross-modal attention:** Cross-modal attention will improve image–text ranking over a matched recurrent model when the visual/text representations, training budget, data split, and loss objectives are held constant.
+- **H4 — Data strategy:** Using multiple captions per image and appropriate image augmentation will affect retrieval generalization; the direction and size of the effect must be measured rather than assumed.
+- **H5 — Visual initialization:** A pretrained ResNet50 will provide a stronger or more efficient starting point than training the same visual backbone from scratch on Flickr30k.
+
+### Comparison rules
+
+Use the same image-level fold, preprocessing, candidate pool, retrieval evaluator, batch/step budget, and validation protocol for all models in a comparison. Report each final selected configuration over at least three seeds (42, 123, 456), with mean ± standard deviation. Any run that differs in loss function, auxiliary objective, batch size, number of steps, caption sampling, augmentation, or backbone trainability must be identified as a separate experiment rather than presented as a controlled architecture comparison.
+
+The held-out test set is reserved for one final evaluation after model selection. Do not use test metrics to tune hyperparameters, choose a checkpoint, or make architecture decisions.
+
+### Ablation and data-strategy study
+
+The following experiments are required; their outcomes remain pending until completed and logged:
+
+| Study | Control | Changed factor | Required comparison |
+|---|---|---|---|
+| Cross-modal attention | LSTM without cross-modal attention | Enable cross-modal attention only | Same loss terms and weights in both runs |
+| Matching objective | Same architecture without matching loss | Enable matching loss | Keep attention and all other settings fixed |
+| Caption count | Five captions/image | One caption/image | Verify non-zero loss and valid positive/negative pairs |
+| Image augmentation | No augmentation | Light augmentation | Same model, split, and training budget |
+| Visual initialization | Pretrained ResNet50 | ResNet50 from scratch | Same trainable-layer policy where possible |
+| Fine-tuning | Frozen pretrained backbone | Unfreeze specified final block | Same initialization and training budget |
+
+The previously logged one-caption Phase 5 run reported a training objective of exactly 0.000000 while validation retrieval loss was 0.847462. This is anomalous; inspect positive/negative construction and loss reduction before interpreting or repeating it as evidence.
+
+### Retrieval metrics and error analysis
+
+Report Text-to-Image and Image-to-Text Recall@1, Recall@5, Recall@10, Mean Recall, MRR, and Median Rank. Include per-seed values and mean ± standard deviation. Because this is a retrieval/ranking task rather than a conventional single-label classification task, ordinary per-class accuracy is not directly applicable. If reliable image categories or tags are available, report retrieval metrics by category; otherwise define and report query slices (for example, queries mentioning people, animals, actions, colors, or spatial relations) and state the sampling procedure.
+
+For error analysis, save actual queries, ground-truth relevant items, top-five predictions, ranks/scores, and a human-assigned error category for both directions. Use categories such as object confusion, action confusion, attribute mismatch, spatial-relation mismatch, omitted object, and semantic mismatch. Report counts over a declared sample; do not invent examples or counts.
+
+### Computational-cost reporting
+
+For every final model, record: trainable and total parameter count, checkpoint size, training duration, inference latency and throughput for both retrieval directions, peak memory if measurable, and exact CPU/GPU, RAM, operating system, TensorFlow, and CUDA versions. State the measurement batch size, warm-up count, and number of timed repetitions.
+
+### Current status correction — 20 November 2026
+
+The latest received log supersedes the earlier progress note that described the seed-123 LSTM run as in progress. The LSTM run `fair200_20261120_lstm_fold1_seed123` completed on CPU: training objective 2.060249, validation retrieval loss 1.856892, and training time 22.93 minutes. Its best checkpoint is `checkpoints/experiments/fair200_20261120_lstm_fold1_seed123/best/best_model-1`. The seed-123 Cross-Modal Attention run had started but had not yet produced final metrics in the supplied log. Seed-456 runs remain pending in the latest confirmed status. These loss values are not Recall@K and do not establish a final winner.
+
+### Final submission checklist
+
+- [ ] State H1–H5 in the proposal/report and link each to a planned experiment.
+- [ ] Complete comparable three-seed runs for every architecture included in the final claim.
+- [ ] Compute T2I/I2T retrieval metrics and mean ± standard deviation.
+- [ ] Inspect the sequence-mask warnings and verify padding is excluded correctly.
+- [ ] Fix and rerun the anomalous one-caption loss experiment.
+- [ ] Complete isolated attention and matching-loss ablations.
+- [ ] Complete augmentation, caption-count, pretrained-vs-scratch, and fine-tuning studies or explicitly report them as not completed.
+- [ ] Generate real qualitative retrieval galleries and error-analysis counts.
+- [ ] Measure parameters, model size, latency, throughput, memory, and hardware.
+- [ ] Select the model using validation only, then run the held-out test evaluation once.
+- [ ] Run an end-to-end demo test with the selected checkpoint and matching gallery.
