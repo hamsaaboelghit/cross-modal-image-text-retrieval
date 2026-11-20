@@ -116,10 +116,22 @@ def load_development_dataset():
         )
         selected_validation_count += extra_validation
 
-    dataset = (
-        train_tf.take(selected_train_count)
-        .concatenate(validation_tf.take(selected_validation_count))
+    # Dataset.take() counts dataset elements. Because train_tf and
+    # validation_tf are already batched, taking selected_*_count here
+    # would count batches rather than images and produce too many images.
+    # Unbatch first, select the exact number of images, then batch again.
+    selected_train = (
+        train_tf.unbatch()
+        .take(selected_train_count)
+        .batch(BATCH_SIZE, drop_remainder=False)
     )
+    selected_validation = (
+        validation_tf.unbatch()
+        .take(selected_validation_count)
+        .batch(BATCH_SIZE, drop_remainder=False)
+    )
+
+    dataset = selected_train.concatenate(selected_validation)
 
     total_count = selected_train_count + selected_validation_count
 
