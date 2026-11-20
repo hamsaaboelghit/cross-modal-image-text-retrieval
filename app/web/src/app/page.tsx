@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import {
-  ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, BrainCircuit, Check,
+  ArrowDown, ArrowRight, ArrowUpRight, BadgeCheck, BrainCircuit,
   ChevronDown, CircleAlert, Clock3, Database, Image as ImageIcon,
   LoaderCircle, RefreshCw, Search, Sparkles, Upload, X,
 } from "lucide-react";
