@@ -599,3 +599,12 @@ The seed-123 Cross-Modal Attention run had started but had not produced final me
 - [ ] Select the model using validation only and run the held-out test evaluation once.
 - [ ] Validate the live demo end to end with the final selected checkpoint and gallery.
 - [ ] Add plots, galleries, and final reproducibility evidence.
+
+
+## Latest Phase 5 GRU checkpoint evaluation progress — 20 November 2026
+
+A validation evaluation was launched for `checkpoints/experiments/gru_phase5_resnet50_pretrained/best` with `--model-type full --encoder-type gru --pretrained`, writing to `results/evaluation_gru_resnet50.json`. The evaluator restored `best_model-1` successfully. The checkpoint metadata reports epoch 0 (zero-based), fold 1, seed 42, and validation loss **0.8051351488**.
+
+The recorded training configuration is one epoch, batch size 1, AdamW (learning rate 0.0001, weight decay 0.0001), InfoNCE temperature 0.07, matching-loss weight 0.2, up to 200 training steps and 100 validation steps, with pretrained ResNet50. The supplied log showed validation feature extraction reaching 4,800 images, but it ended before the evaluator printed its final metrics. Consequently, this evaluation remains **in progress / output not yet verified**. No Recall@K, Mean Recall, MRR, Median Rank, final query count, or completed JSON artifact is claimed here.
+
+The Keras warnings about projection layers discarding sequence-mask metadata should be investigated; they did not stop the checkpoint restore or the extraction progress shown. oneDNN and CPU feature notices are informational runtime messages. The checkpoint validation loss is not a substitute for retrieval-ranking metrics. Update this record only after the process exits and the JSON file is inspected. The held-out test set must remain unused until final model selection.
