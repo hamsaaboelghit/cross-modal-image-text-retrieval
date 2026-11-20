@@ -468,3 +468,17 @@ The seed-123 LSTM run is currently in progress (run 5/9); no completed metrics a
 **Interpretation caution:** the cross-modal attention configuration additionally enables an auxiliary matching loss (weight 0.2), whereas GRU and LSTM do not. Therefore, this is not an isolated attention ablation. Also, the current Keras logs warn that projection layers receive and discard sequence-mask metadata. This warning has not stopped training, but its effect on padded-token handling should be investigated before finalizing the methodology and results.
 
 These are validation-loss and training-time observations only. Retrieval-ranking metrics (T2I/I2T Recall@K, Mean Recall, MRR, and Median Rank) remain necessary for final model comparison; no final winning model is selected at this stage.
+
+
+### Phase 5 progress update — one-caption experiment (20 November 2026)
+
+The GRU one-caption-per-image experiment has completed on CPU. It used seed 42, fold 1, batch size 1, one epoch, 200 training steps, 100 validation batches, AdamW with learning rate 0.0001, InfoNCE temperature 0.07, a pretrained frozen ResNet50, and no image augmentation. Evaluation used batch size 4 over the validation set; the held-out test split was not used.
+
+| Phase 5 configuration | Captions/image | Training objective | Validation retrieval loss | Training time |
+|---|---:|---:|---:|---:|
+| Reference | 5 | 0.819112 | 0.805117 | 7.56 min |
+| One-caption | 1 | 0.000000 | 0.847462 | 7.66 min |
+
+The one-caption run's reported training objective and retrieval loss are both exactly zero, while its validation retrieval loss is non-zero. This is an anomalous result and must not be interpreted as successful optimization. The loss computation and negative-sampling/batch construction for this configuration require code-level inspection before the experiment can support a conclusion about caption count. The validation-loss difference (0.847462 versus 0.805117) is recorded descriptively only; the one-caption result is flagged for verification.
+
+The light-augmentation experiment (Phase 5 run 3/5) had started but had not produced completed metrics in the latest log. The pretrained fine-tuning and scratch-backbone experiments remain pending. These Phase 5 runs use a different budget and batch size from the main repeated-seed comparison and must remain a separate experiment group.
