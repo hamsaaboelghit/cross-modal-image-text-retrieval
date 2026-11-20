@@ -22,6 +22,10 @@ class ProjectionHead(tf.keras.layers.Layer):
         **kwargs,
     ):
         super().__init__(**kwargs)
+        # TextEncoder has already consumed the token mask when it pools a
+        # caption into one vector. ProjectionHead must explicitly handle the
+        # inherited mask instead of letting Keras warn that it is discarded.
+        self.supports_masking = True
 
         if input_dim < 1:
             raise ValueError("input_dim must be positive")
@@ -62,6 +66,13 @@ class ProjectionHead(tf.keras.layers.Layer):
         )
 
         self.output_dim = embedding_dim
+
+    def compute_mask(self, inputs, previous_mask=None):
+        # Preserve masks only for sequence-shaped features. A pooled [B,D]
+        # embedding has no time axis, so a token mask must not propagate.
+        if inputs.shape.rank == 3:
+            return previous_mask
+        return None
 
     def call(self, features, training=None):
         features = tf.convert_to_tensor(features)
