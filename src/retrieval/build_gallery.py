@@ -36,6 +36,7 @@ CAPTIONS_PATH = (
 )
 
 BATCH_SIZE = 32
+MAX_GALLERY_IMAGES = 5000  # Build a smaller gallery for website testing.
 FOLD_NUMBER = 1
 EMBEDDING_DIM = 512
 CAPTIONS_PER_IMAGE = 5
@@ -74,22 +75,62 @@ def load_development_dataset():
 
     dataset = train_tf.concatenate(validation_tf)
 
-    train_count = len(train_dataset)
-    validation_count = len(validation_dataset)
-    total_count = train_count + validation_count
+    full_train_count = len(train_dataset)
+    full_validation_count = len(validation_dataset)
+    full_total_count = full_train_count + full_validation_count
 
-    if total_count == 0:
+    if full_total_count == 0:
         raise ValueError(
             "The development dataset contains no images."
         )
 
-    print("Training images:", train_count)
-    print("Validation images:", validation_count)
-    print("Total development images:", total_count)
+    # Keep the original train/validation proportions while limiting
+    # the gallery size. The test split remains excluded.
+    selected_train_count = min(
+        full_train_count,
+        int(round(
+            MAX_GALLERY_IMAGES * full_train_count / full_total_count
+        )),
+    )
+    selected_validation_count = min(
+        full_validation_count,
+        MAX_GALLERY_IMAGES - selected_train_count,
+    )
+
+    # Fill any remaining slots if one split is smaller than its target.
+    remaining = MAX_GALLERY_IMAGES - (
+        selected_train_count + selected_validation_count
+    )
+    if remaining > 0:
+        extra_train = min(
+            remaining,
+            full_train_count - selected_train_count,
+        )
+        selected_train_count += extra_train
+        remaining -= extra_train
+
+    if remaining > 0:
+        extra_validation = min(
+            remaining,
+            full_validation_count - selected_validation_count,
+        )
+        selected_validation_count += extra_validation
+
+    dataset = (
+        train_tf.take(selected_train_count)
+        .concatenate(validation_tf.take(selected_validation_count))
+    )
+
+    total_count = selected_train_count + selected_validation_count
+
+    print("Training images selected:", selected_train_count)
+    print("Validation images selected:", selected_validation_count)
+    print("Total gallery images:", total_count)
+    print("Maximum gallery images:", MAX_GALLERY_IMAGES)
 
     return dataset, {
-        "train_count": train_count,
-        "validation_count": validation_count,
+        "train_count": selected_train_count,
+        "validation_count": selected_validation_count,
         "total_count": total_count,
     }
 
