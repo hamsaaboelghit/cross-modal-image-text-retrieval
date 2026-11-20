@@ -148,3 +148,24 @@ A validation evaluation was launched for the Phase 5 pretrained-ResNet50 GRU che
 The supplied console log confirms successful model-weight restoration and validation embedding extraction through 4,800 images. It stops before the final evaluation summary; therefore the run is **not yet confirmed complete**. Retrieval-ranking metrics (T2I/I2T Recall@1/5/10, Mean Recall, MRR, Median Rank), final evaluated counts, and the JSON output contents remain **Pending**. Do not add the checkpoint validation loss to the retrieval-results table or infer retrieval quality from it.
 
 Keras reported that projection layers discard the attached sequence mask. The warning did not prevent the logged extraction progress, but it remains a modeling issue to investigate. The held-out test split is not reported as used in this evaluation.
+
+## Completed Phase 5 GRU validation evaluation — 20 November 2026
+
+The evaluation of `checkpoints/experiments/gru_phase5_resnet50_pretrained/best` completed successfully. The evaluator restored `best_model-1`, extracted embeddings for 5,086 validation images, and saved `results/evaluation_gru_resnet50.json`. The held-out test split was **not used**.
+
+- Architecture arguments: full model, GRU text encoder, pretrained ResNet50.
+- Fold / seed: 1 / 42.
+- Checkpoint epoch: 0 (zero-based).
+- Stored checkpoint validation loss: 0.8051351488.
+- Configuration: one epoch, batch size 1, AdamW, learning rate 0.0001, weight decay 0.0001, InfoNCE temperature 0.07, matching-loss weight 0.2, maximum 200 training steps and 100 validation steps.
+
+| Direction | Recall@1 | Recall@5 | Recall@10 | Mean Recall | Median Rank | MRR |
+|---|---:|---:|---:|---:|---:|---:|
+| Text-to-Image | 0.0197% | 0.1101% | 0.2320% | 0.1206% | 2,539 | 0.001861 |
+| Image-to-Text | 0.0000% | 0.0983% | 0.1966% | 0.0983% | 3,921.5 | 0.001512 |
+
+Text-to-Image used 25,430 caption queries and 5,086 image candidates. Image-to-Text used 5,086 image queries and 25,430 caption candidates.
+
+**Interpretation:** Both directions show extremely weak retrieval performance (Recall@10 below 0.25%). This supports the observed demo behavior where returned images/captions are often unrelated to the query. This run establishes successful checkpoint loading and metric computation, not a successful retrieval model. The stored validation loss is not a ranking metric and should not be used to claim model quality.
+
+The Keras sequence-mask warnings persisted: projection layers discard the attached mask. Evaluation completed, but mask handling requires investigation. The earlier in-progress entry is superseded by these completed results. These values are validation-only, from one seed and a short training run; they are not comparable as a final fair benchmark and must not be presented as held-out test results.
