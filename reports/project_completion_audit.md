@@ -75,8 +75,8 @@ The latest user-provided run log confirms two completed GRU pilot variants with 
 | Experiment | Configuration change | Validation retrieval loss | Training time | Status |
 |---|---|---:|---:|---|
 | `gru_phase5_data_reference` | Five captions; no augmentation; pretrained ResNet50 frozen | Not available in the supplied log excerpt | Reused checkpoint | Evaluated; metric not captured in the excerpt |
-| `gru_phase5_one_caption` | One caption per image | 0.847462 | 7.66 min | Completed |
-| `gru_phase5_light_augmentation` | Five captions; light image augmentation | **0.805119** | 7.92 min | Completed |
+| `gru_phase5_one_caption` | One caption per image | 0.847462 | Not captured | Completed |
+| `gru_phase5_light_augmentation` | Five captions; light image augmentation | **0.805119** | Not captured | Completed |
 | `gru_phase5_resnet50_pretrained` | Five captions; pretrained ResNet50 with last block unfrozen | Pending | Running at the latest log snapshot | In progress |
 | `gru_phase5_resnet50_scratch` | Five captions; ResNet50 initialized from scratch with last block unfrozen | Pending | Pending | Not yet run |
 
