@@ -212,3 +212,17 @@ A supplementary Phase 5 reference run completed on CPU using GRU, seed 42, Flick
 | GRU Phase 5 reference | 7.56 min | 0.819112 | 0.805117 |
 
 This is a separate diagnostic configuration and must not be pooled with the batch-size-4, 200-validation-batch three-model comparison. The checkpoint was reused during resume. The evaluation batch size was increased to 4 while retaining all 5,086 validation images; feature extraction was approximately 1,272 batches rather than 5,086 single-image batches. The one-caption Phase 5 run was still in progress in the latest log, so its metrics and runtime remain Pending.
+
+
+### 2.1.2 Repeated-seed comparison — current progress
+
+The nine-run comparison is progressing. The following runs have completed under the common fold-1 setup (batch size 4, one epoch, 200 training steps, 200 validation batches, AdamW at 0.0001, InfoNCE temperature 0.07, five captions per image, no augmentation, frozen pretrained ResNet50, CPU execution):
+
+| Model | Seed | Training time | Training objective | Validation retrieval loss |
+|---|---:|---:|---:|---:|
+| GRU | 42 | 25.16 min | 2.086361 | 1.898083 |
+| LSTM | 42 | 22.03 min | 2.089612 | 1.884016 |
+| Cross-modal attention (LSTM) | 42 | 55.62 min | 2.235646 | 1.903820 |
+| GRU | 123 | 25.51 min | 2.039485 | 1.826844 |
+
+The seed-123 LSTM run is currently in progress (run 5/9); its final training time and metrics are pending. Seed-123 cross-modal attention and all seed-456 runs are pending. The cross-modal attention run includes an auxiliary matching loss (weight 0.2), unlike the GRU/LSTM runs, so its runtime is for the full configuration and does not isolate attention overhead. The held-out test split was not used. Mean and standard deviation will be calculated only after comparable repeated runs are complete.
