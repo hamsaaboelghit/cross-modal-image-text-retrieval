@@ -1,157 +1,193 @@
-# Computational Cost Report — VisionMatch AI
+# Computational Cost Analysis
 
-**Project:** Cross-Modal Image–Text Retrieval Using Deep Learning  
-**Repository:** `hamsaaboelghit/cross-modal-image-text-retrieval`  
-**Status:** Living report — updated as new experiment logs and measurements are provided.  
-**Last updated:** 2026-11-20
+**Project:** VisionMatch AI — Cross-Modal Image–Text Retrieval Using Deep Learning  
+**Report type:** Academic project report  
+**Status:** Preliminary; incomplete measurements are explicitly marked as pending.  
+**Last updated:** 20 November 2026
 
-> This report records measured values only. Missing values are explicitly marked **Pending measurement**; they must not be estimated or presented as measured results. Training times from different experiment configurations are kept separate because they are not directly comparable.
+## 1. Purpose and scope
 
-## 1. What must be reported
+This section evaluates the computational requirements of the image–text retrieval models. The comparison must consider not only retrieval quality but also the resources required to train, store, and use each model.
 
-For every model/configuration, the final computational-cost evaluation should include:
+For every model included in the final comparison, the report will provide:
 
-1. **Training time:** elapsed wall-clock time, with the number of epochs/steps and dataset subset stated.
-2. **Inference time:** latency per image–text query and/or throughput (queries per second), with batch size and direction stated.
-3. **Parameter count:** total and, ideally, trainable parameters.
-4. **Model size:** saved checkpoint size on disk (and optionally serialized model size), with the measurement method stated.
-5. **Hardware/software:** CPU model, GPU model and whether it was actually used, RAM, OS/runtime, TensorFlow version, precision, and batch size.
+- **Training time:** elapsed time required for the stated training configuration.
+- **Inference time:** time required to process a query and retrieve matching items.
+- **Parameter count:** total number of model parameters and, where relevant, the number of trainable parameters.
+- **Model size:** storage occupied by the saved model/checkpoint.
+- **Hardware:** processor, graphics processor (if used), memory, and relevant software/runtime details.
 
-For this retrieval project, inference should be measured separately for **Text-to-Image** and **Image-to-Text**. Report both single-query latency (batch size 1) and batched throughput if feasible. Separate image-feature extraction from text-query/search time where applicable; clarify whether the image gallery embeddings are precomputed or computed online.
+All measurements must be accompanied by their experimental conditions. Values obtained with different datasets, step counts, batch sizes, hardware, or training configurations must not be treated as directly comparable.
 
-## 2. Current hardware inventory
+## 2. Training time
 
-| Machine | Environment currently used | Hardware facts confirmed | Important limitation |
-|---|---|---|---|
-| Laptop 1 | WSL/Linux, TensorFlow CPU environment | CPU execution confirmed; WSL RAM limit approximately 2.1 GB | RTX 4050 is not available to TensorFlow in this WSL environment; runs resolve to `/CPU:0` |
-| Laptop 2 | Native Windows, TensorFlow 2.21.0 | TensorFlow reports no available GPUs (`GPUs []`); CPU execution | Exact CPU model and installed RAM have not yet been recorded |
-| Laptop 3 | Windows, TensorFlow 2.16.2 | TensorFlow reports no available GPUs (`GPUs []`); CPU execution | Flickr30k image directory was incomplete (1,056 images); its attempted Phase 5 runs failed before valid training due to missing image `4295263796.jpg`. These are not valid timing results. |
+Training time is the wall-clock duration required to train a model under a clearly specified configuration. It should be reported together with the number of epochs, training steps, batch size, dataset split/subset, optimizer, and hardware.
 
-**Hardware details still to collect:** exact CPU name/model, physical RAM, GPU name/VRAM (even if unused), OS version, and whether the GPU was used. Do not describe a GPU as the training device when the logs say `/CPU:0`.
+### 2.1 Preliminary three-model comparison
 
-## 3. Fair three-model comparison — Laptop 1
+The following results are currently available for the three main model configurations. Each run used Flickr30k fold 1, one epoch, 200 training steps, 200 validation batches, batch size 4, learning rate 0.0001, AdamW, InfoNCE loss with temperature 0.07, a pretrained frozen ResNet50 image encoder, five captions per image, no image augmentation, and random seed 42. Training ran on the CPU.
 
-**Configuration shared by the three completed Seed 42 runs:**
+| Model configuration | Training time | Training objective | Validation retrieval loss |
+|---|---:|---:|---:|
+| GRU text encoder | 25.16 min | 2.086361 | 1.898083 |
+| LSTM text encoder | 22.03 min | 2.089612 | 1.884016 |
+| LSTM with cross-modal attention | 55.62 min | 2.235646 | 1.903820 |
 
-- Dataset: Flickr30k, fold 1
-- Encoder comparison: GRU, LSTM, and Cross-Attention (LSTM)
-- Training: 1 epoch, 200 training steps, batch size 4
-- Validation: 200 batches
-- Learning rate: 0.0001; AdamW; InfoNCE; temperature 0.07
-- Pretrained ResNet50 frozen; 5 captions per image; no image augmentation
-- Seed: 42
-- Device: TensorFlow `/CPU:0` in WSL/Linux
-- Test split: **not used**
+**Interpretation and limitation:** In this preliminary run, the LSTM configuration had the shortest recorded training time. The cross-modal attention configuration took longer. However, its training setup also enabled an auxiliary cross-modal matching loss (weight 0.2), whereas the GRU and LSTM runs did not. Consequently, these values compare the complete configurations and do not isolate the computational overhead caused by attention alone.
 
-| Model/configuration | Training time | Train objective | Validation retrieval loss | Checkpoint |
-|---|---:|---:|---:|---|
-| GRU | 25.16 min | 2.086361 | 1.898083 | `fair200_20261120_gru_fold1_seed42` |
-| LSTM | 22.03 min | 2.089612 | 1.884016 | `fair200_20261120_lstm_fold1_seed42` |
-| Cross-Attention (LSTM) | 55.62 min | 2.235646 | 1.903820 | `fair200_20261120_cross_attention_fold1_seed42` |
+The comparison is preliminary because only seed 42 is currently available. The remaining runs for seeds 123 and 456 are **Pending**. Final training-time statistics should be reported as mean and standard deviation across the completed repeated runs, where the configurations are comparable.
 
-The Cross-Attention run also enabled cross-modal matching loss (weight 0.2); GRU and LSTM did not. Therefore, the time and loss comparison is a comparison of these full configurations, not an isolated estimate of attention's computational overhead.
+### 2.2 Additional training-time experiments
 
-**Additional processing observed:** after each training run, image-feature extraction processed 5,000 images (1,250 batches at batch size 4). The extraction duration has not been separately recorded, so it is not included in the training-time column.
+The following supplementary measurements are available. They are separate experiments and must not be merged with the three-model comparison above.
 
-### Remaining fair-comparison runs
+**GRU learning-rate study** — one epoch, 200 training steps, 100 validation batches, batch size 4:
 
-The planned comparison contains 9 runs: 3 models × 3 seeds (42, 123, 456).
-
-| Seed | GRU | LSTM | Cross-Attention |
-|---|---|---|---|
-| 42 | Completed | Completed | Completed |
-| 123 | Pending | Pending | Pending |
-| 456 | Pending | Pending | Pending |
-
-The three Seed 42 runs above are preliminary. Final mean and standard deviation across seeds, plus any inference and model-size comparisons, will be added when available.
-
-## 4. Earlier architecture screening — Laptop 1
-
-A separate initial screening used 1,000 training batches and 200 validation batches, seed 42, batch size 4, learning rate 0.0001, AdamW, InfoNCE (temperature 0.07), pretrained frozen ResNet50, and no image augmentation.
-
-| Model | Recorded validation loss | Recorded training time |
-|---|---:|---:|
-| RNN | 1.56653 | 79.80 min |
-| LSTM | 1.49720 | 87.84 min |
-| GRU | 1.49278 | 92.23 min |
-| Transformer | 2.00739 | 69.93 min |
-| Cross-Attention | 1.50309 | 183.33 min |
-
-These are screening results from a different run configuration and must **not** be mixed with the 200-step fair-comparison results above. The RNN and Transformer are included here because they were part of the initial architecture screening; whether they are part of the final model shortlist should be stated in the final report.
-
-A later 1,500-batch continuation recorded these validation losses:
-- RNN: 1.477530
-- LSTM: 1.429494
-- GRU: 1.425647
-- Transformer: 1.852953
-
-A Cross-Attention continuation of 500 additional batches (reported total: 1,500) recorded validation retrieval loss 1.416129 and took 111.13 minutes for that continuation. Do not add this continuation time to another run unless the exact run relationship is verified from its logs.
-
-## 5. GRU learning-rate study — Laptop 2
-
-**Shared setup:** GRU, seed 42, batch size 4, 200 training steps, 100 validation steps, 1 epoch per run, pretrained ResNet50, CPU-only TensorFlow 2.21.0 on native Windows.
-
-| Learning rate | Training time | Train loss | Validation retrieval loss |
+| Learning rate | Training time | Training loss | Validation retrieval loss |
 |---:|---:|---:|---:|
 | 0.00005 | 12.24 min | 2.140974 | 1.987902 |
 | 0.00010 | 11.99 min | 2.086361 | 1.914725 |
 | 0.00020 | 11.87 min | 2.056058 | 1.815485 |
 
-The best validation retrieval loss among these tested learning rates was observed at 0.0002. This is a small validation study, not a full-dataset final performance result.
+**Cross-modal attention ablation** — GRU, one epoch, 200 training steps, 100 validation batches, batch size 4, learning rate 0.0002:
 
-## 6. Cross-modal attention ablation — Laptop 2
-
-**Shared setup:** GRU, seed 42, fold 1, batch size 4, 1 epoch, 200 training steps, 100 validation steps, learning rate 0.0002, pretrained ResNet50, CPU-only TensorFlow 2.21.0 on native Windows.
-
-| Configuration | Training time | Train objective | Validation retrieval loss |
+| Configuration | Training time | Training objective | Validation retrieval loss |
 |---|---:|---:|---:|
-| Attention off | 11.35 min | 2.056058 | 1.815485 |
-| Attention on | 26.51 min | 2.199328 | 1.848958 |
+| Attention disabled | 11.35 min | 2.056058 | 1.815485 |
+| Attention enabled | 26.51 min | 2.199328 | 1.848958 |
 
-**Important confound:** the attention-on run also enabled cross-modal matching loss (weight 0.2), while the attention-off run did not. Therefore, this experiment changes both attention and the auxiliary matching loss; it does not isolate the effect of attention alone.
+**Ablation limitation:** The attention-enabled experiment also enabled the auxiliary cross-modal matching loss (weight 0.2), while the attention-disabled experiment did not. This is therefore not a perfectly isolated attention ablation.
 
-## 7. Parameters, checkpoint size, and inference latency
+### 2.3 Other architecture screening results
 
-These measurements have not yet been supplied for the current runs.
+An earlier screening experiment used 1,000 training batches and 200 validation batches, with seed 42 and batch size 4. Its results are shown separately because the training budget differs from the preliminary three-model comparison.
 
-| Model/configuration | Total parameters | Trainable parameters | Checkpoint size | Text-to-Image latency | Image-to-Text latency |
-|---|---:|---:|---:|---:|---:|
-| RNN | Pending | Pending | Pending | Pending | Pending |
-| LSTM | Pending | Pending | Pending | Pending | Pending |
-| GRU | Pending | Pending | Pending | Pending | Pending |
-| Transformer | Pending | Pending | Pending | Pending | Pending |
-| Cross-Attention | Pending | Pending | Pending | Pending | Pending |
+| Architecture | Training time | Validation retrieval loss |
+|---|---:|---:|
+| RNN | 79.80 min | 1.56653 |
+| LSTM | 87.84 min | 1.49720 |
+| GRU | 92.23 min | 1.49278 |
+| Transformer | 69.93 min | 2.00739 |
+| Cross-Attention | 183.33 min | 1.50309 |
 
-For fair reporting, parameter counts should be obtained from the instantiated model architecture, and checkpoint size should be measured from the actual saved checkpoint files. Do not assume that the checkpoint size equals the in-memory parameter size.
+These screening results are exploratory and should not be compared directly with the one-epoch, 200-step runs.
 
-## 8. Inference measurement protocol (to be completed)
+## 3. Inference time
 
-Use the same hardware and model input dimensions for every model.
+Inference time measures how long a trained model takes to process input and return retrieval results. It is different from training time.
 
-1. Load the selected checkpoint and record model-loading time separately.
-2. Warm up the model before timing.
-3. Measure at least 100 repeated queries (preferably more); report mean and standard deviation or median and p95 latency.
-4. Measure batch size 1 latency and a fixed larger batch throughput.
-5. For Text-to-Image, state whether the image gallery embeddings are precomputed. Report query-encoding/search latency separately from one-time gallery indexing.
-6. For Image-to-Text, state whether caption embeddings are precomputed and report image-encoding/search latency.
-7. Use the same gallery size and candidate set for all models.
+Because VisionMatch AI supports two retrieval directions, inference must be measured separately:
 
-## 9. Outstanding measurements and next updates
+1. **Text-to-Image retrieval:** encode a text query and retrieve the most relevant images.
+2. **Image-to-Text retrieval:** encode an input image and retrieve the most relevant captions.
 
-- [ ] Record exact CPU model, RAM, GPU model/VRAM, OS version, and TensorFlow version for Laptop 1 and Laptop 2.
-- [ ] Finish the six remaining fair-comparison runs (Seed 123 and 456).
-- [ ] Collect total and trainable parameter counts for each final model.
-- [ ] Measure actual checkpoint sizes for each final model.
-- [ ] Run and record Text-to-Image and Image-to-Text inference latency/throughput using a consistent protocol.
-- [ ] Separately time feature extraction/gallery indexing if it is part of the deployed workflow.
-- [ ] Add final mean ± standard deviation across seeds for comparable model configurations.
-- [ ] Update this report with the Phase 5 data-strategy/pretrained-vs-scratch results after those experiments complete.
+The final report should include:
 
-## 10. Reporting cautions
+- Single-query latency with batch size 1.
+- Throughput for a stated batch size, such as queries per second.
+- Mean latency and a variability measure (standard deviation, median, or p95).
+- Model-loading time, reported separately from query inference.
+- Whether candidate image/caption embeddings are precomputed or generated at query time.
+- Gallery/index size used during measurement.
 
-- Training time depends on hardware, dataset subset, batch size, number of steps/epochs, preprocessing, and whether feature extraction is included. Always report the configuration beside the time.
-- Do not compare times from different laptops as if they were controlled hardware comparisons.
-- Do not call validation retrieval loss an inference metric or a final test metric.
-- Do not report Laptop 3's failed missing-file runs as completed experiments or valid timings.
-- Keep training, feature extraction, model loading, and inference latency as separate measurements.
-- Add new measurements with their source log/checkpoint and date so the report remains auditable.
+For a fair comparison, all models must be measured using the same hardware, input dimensions, candidate gallery, batch sizes, and timing procedure. Image-gallery feature extraction or indexing should be measured separately from query-time inference if embeddings are precomputed.
+
+**Current status:** Text-to-Image inference time — **Pending measurement**. Image-to-Text inference time — **Pending measurement**. Throughput and latency statistics — **Pending measurement**.
+
+## 4. Model parameter count
+
+The parameter count indicates the number of numerical values learned or used by the model. The report should provide:
+
+- **Total parameters:** all parameters in the instantiated model.
+- **Trainable parameters:** parameters updated during training.
+- **Non-trainable parameters:** parameters held fixed, such as a frozen pretrained image encoder.
+
+This distinction is important because the project uses a pretrained ResNet50 image encoder, which may be frozen in some experiments and fine-tuned in others. The total parameter count can remain the same while the trainable parameter count changes.
+
+Parameter counts should be obtained from the actual instantiated model for each architecture and configuration, rather than estimated from architecture names.
+
+| Model | Total parameters | Trainable parameters |
+|---|---:|---:|
+| RNN | Pending measurement | Pending measurement |
+| LSTM | Pending measurement | Pending measurement |
+| GRU | Pending measurement | Pending measurement |
+| Transformer | Pending measurement | Pending measurement |
+| Cross-modal attention model | Pending measurement | Pending measurement |
+
+## 5. Model size
+
+Model size refers to the storage required by the saved trained model.
+
+The final report should state the actual size of the saved checkpoint or exported model file, measured in MB. If training checkpoints contain optimizer state or other metadata, distinguish the full checkpoint size from the inference-only exported model size where possible.
+
+Model size should be measured from the saved files; it must not be inferred from parameter count alone.
+
+| Model | Saved checkpoint size | Inference/export model size |
+|---|---:|---:|
+| RNN | Pending measurement | Pending measurement |
+| LSTM | Pending measurement | Pending measurement |
+| GRU | Pending measurement | Pending measurement |
+| Transformer | Pending measurement | Pending measurement |
+| Cross-modal attention model | Pending measurement | Pending measurement |
+
+## 6. Hardware and software environment
+
+Computational results are meaningful only when the hardware and software environment is documented. For each reported experiment, record:
+
+- CPU model and number of available cores.
+- GPU model and available memory (VRAM), if present.
+- Whether training and inference actually used the GPU or CPU.
+- System RAM.
+- Operating system and version.
+- Deep-learning framework and version.
+- Numerical precision (for example, float32 or mixed precision).
+- Batch size and relevant input dimensions.
+
+The experiment logs confirm CPU execution for the currently reported runs. A GPU was not used for these measurements. Exact CPU model, physical RAM, and complete hardware specifications are **Pending documentation**.
+
+| Hardware/software detail | Current record |
+|---|---|
+| Execution device for reported runs | CPU |
+| GPU acceleration | Not used in the reported runs |
+| Exact CPU model | Pending documentation |
+| System RAM | Pending documentation |
+| GPU model and VRAM | Pending documentation |
+| Operating system/version per run | Pending documentation |
+| TensorFlow version per run | Pending documentation |
+| Numerical precision | float32 / mixed precision status to be confirmed per final run |
+
+Hardware details must be associated with the relevant experiment. Results collected on different systems should not be presented as a controlled hardware comparison.
+
+## 7. Measurement protocol
+
+To make the computational-cost comparison reproducible:
+
+1. Use the same input dimensions and data-processing pipeline for all models.
+2. Record training duration from the start to the end of the training procedure, excluding unrelated setup unless explicitly stated.
+3. Report feature extraction/index construction separately from model training and query-time inference.
+4. Load each checkpoint before timing inference and report loading time separately.
+5. Run warm-up iterations before collecting inference measurements.
+6. Measure at least 100 queries where feasible, using the same query set and candidate gallery for each model.
+7. Report batch size, mean latency, variability (standard deviation or p95), and throughput.
+8. Count parameters from the instantiated architecture and measure checkpoint size from the actual saved files.
+9. Document hardware and software settings alongside every measurement.
+
+## 8. Outstanding requirements
+
+The following items remain to be completed before the computational-cost analysis can be considered complete:
+
+- [x] Record preliminary training times for GRU, LSTM, and cross-modal attention configurations.
+- [x] Record supplementary GRU learning-rate and attention-ablation training times.
+- [ ] Complete the repeated three-seed model comparison and report mean training time and standard deviation.
+- [ ] Measure Text-to-Image inference latency and throughput.
+- [ ] Measure Image-to-Text inference latency and throughput.
+- [ ] Measure total and trainable parameter counts for every final model.
+- [ ] Measure saved checkpoint size and, where applicable, inference-only model size.
+- [ ] Document exact CPU, GPU, RAM, operating system, framework version, and numerical precision for the final experiments.
+- [ ] Measure feature extraction or gallery-index construction time separately if used by the retrieval system.
+
+## 9. Conclusion
+
+The current measurements provide an initial view of training cost for the GRU, LSTM, and cross-modal attention configurations, as well as supplementary learning-rate and ablation experiments. They suggest that the cross-modal attention configuration requires more training time in the measured setup, although the auxiliary matching loss is an experimental confound.
+
+A complete computational-cost comparison cannot yet be concluded. Inference latency, throughput, parameter counts, saved model sizes, full hardware specifications, and repeated-seed statistics remain to be measured or documented. These values will be added when the corresponding experimental results become available.
