@@ -12,7 +12,7 @@ MODELS=({"name":"gru","encoder":"gru","cross":False},
 FOLD,BATCH=1,4
 LR,TEMP,OUT_DIM,DROPOUT=1e-4,0.07,512,0.1
 TRAIN_STEPS,VAL_STEPS=200,200
-OUT=ROOT/"results/three_seed_200"
+OUT=ROOT/"results/fair_comparison_20261120"
 
 def save_csv(rows):
     fields=["experiment","status","model","seed","fold","batch_size","train_steps",
@@ -51,7 +51,7 @@ def main():
     idx,total=0,len(SEEDS)*len(MODELS)
     for seed in SEEDS:
         for m in MODELS:
-            idx+=1; name=f"three_seed200_{m['name']}_fold{FOLD}_seed{seed}"
+            idx+=1; name=f"fair200_20261120_{m['name']}_fold{FOLD}_seed{seed}"
             if name in completed: print("[SKIP]",name); continue
             ckpt=ROOT/"checkpoints/experiments"/name
             if ckpt.exists():
