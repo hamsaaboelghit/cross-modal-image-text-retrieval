@@ -37,6 +37,16 @@ The following results are currently available for the three main model configura
 
 The comparison is preliminary because only seed 42 is currently available. The remaining runs for seeds 123 and 456 are **Pending**. Final training-time statistics should be reported as mean and standard deviation across the completed repeated runs, where the configurations are comparable.
 
+### 2.1.1 Repeated-seed comparison — additional GRU result
+
+A second GRU run has now completed for seed 123 under the same fold-1, one-epoch, 200-training-step, 200-validation-batch, batch-size-4 configuration described above.
+
+| Model | Seed | Training time | Training objective | Validation retrieval loss |
+|---|---:|---:|---:|---:|
+| GRU | 123 | 25.51 min | 2.039485 | 1.826844 |
+
+The seed-123 validation loss is lower than the seed-42 GRU result (1.898083). This reinforces the need to complete all three seeds before reporting mean ± standard deviation or selecting a final architecture. Seed-123 LSTM and cross-modal attention, and all seed-456 runs, remain **Pending**. Test data was not used.
+
 ### 2.2 Additional training-time experiments
 
 The following supplementary measurements are available. They are separate experiments and must not be merged with the three-model comparison above.
