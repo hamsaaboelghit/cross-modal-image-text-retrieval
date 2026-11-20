@@ -213,6 +213,16 @@ A preliminary comparison was run for GRU, LSTM, and Cross-Modal Attention using 
 
 The cross-modal attention configuration also enabled an auxiliary matching loss with weight 0.2, unlike the GRU and LSTM runs. The result is therefore a comparison of complete configurations, not an isolated attention-only comparison.
 
+### 11.2.1 Additional completed run — seed 123 GRU
+
+The next run in the repeated-seed comparison completed for the GRU configuration using seed 123. It used the same fold-1 setup as the seed-42 comparison: one epoch, 200 training steps, 200 validation batches, batch size 4, AdamW, learning rate 0.0001, InfoNCE temperature 0.07, pretrained frozen ResNet50, five captions per image, and no image augmentation.
+
+| Model | Seed | Training objective | Validation retrieval loss | Training time |
+|---|---:|---:|---:|---:|
+| GRU | 123 | 2.039485 | 1.826844 | 25.51 min |
+
+The seed-123 GRU validation retrieval loss is lower than the seed-42 GRU result (1.898083), illustrating why repeated seeds are required. This single additional run does not establish a model ranking. At the time of this update, seed-123 LSTM and cross-modal attention, and all seed-456 runs, remain **Pending**. The held-out test split was not used.
+
 ### 11.3 Phase 5 data and initialization studies
 
 A separate GRU study uses seed 42, fold 1, batch size 1, 200 training steps, 100 validation steps, one epoch, learning rate 0.0001, and pretrained ResNet50 unless the experiment explicitly tests scratch initialization. It contains five configurations:
