@@ -450,3 +450,21 @@ The reference configuration completed with training objective 0.819112, validati
 - [ ] Run final held-out test evaluation after model selection.
 - [ ] Add plots, retrieval galleries, and qualitative examples.
 - [ ] Format and verify the final 15–25-page report.
+
+
+### Progress update — repeated-seed comparison (20 November 2026)
+
+The controlled three-model comparison is currently progressing through nine runs (GRU, LSTM, and cross-modal attention for seeds 42, 123, and 456). The following runs have completed:
+
+| Seed | Model | Training objective | Validation retrieval loss | Training time |
+|---:|---|---:|---:|---:|
+| 42 | GRU | 2.086361 | 1.898083 | 25.16 min |
+| 42 | LSTM | 2.089612 | 1.884016 | 22.03 min |
+| 42 | Cross-modal attention (LSTM) | 2.235646 | 1.903820 | 55.62 min |
+| 123 | GRU | 2.039485 | 1.826844 | 25.51 min |
+
+The seed-123 LSTM run is currently in progress (run 5/9); no completed metrics are available for it yet. Seed-123 cross-modal attention and all seed-456 runs are also pending. The common setup is fold 1, batch size 4, one epoch, 200 training steps, 200 validation batches, AdamW (learning rate 0.0001), InfoNCE (temperature 0.07), five captions per image, no augmentation, and a frozen pretrained ResNet50. All listed runs executed on CPU, and the held-out test split was not used.
+
+**Interpretation caution:** the cross-modal attention configuration additionally enables an auxiliary matching loss (weight 0.2), whereas GRU and LSTM do not. Therefore, this is not an isolated attention ablation. Also, the current Keras logs warn that projection layers receive and discard sequence-mask metadata. This warning has not stopped training, but its effect on padded-token handling should be investigated before finalizing the methodology and results.
+
+These are validation-loss and training-time observations only. Retrieval-ranking metrics (T2I/I2T Recall@K, Mean Recall, MRR, and Median Rank) remain necessary for final model comparison; no final winning model is selected at this stage.
