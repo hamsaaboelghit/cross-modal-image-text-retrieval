@@ -1125,3 +1125,45 @@ The reported I2T Recall@K means that at least one of the five reference
 captions for an image is present in the top K. It does not mean that all five
 captions were retrieved. Cross-modal matching-head metrics are a separate
 evaluation and must not be confused with the dual-encoder retrieval metrics.
+
+
+
+## Latest controlled-comparison progress — 20 November 2026
+
+The fair three-seed comparison is still running. The following update records only the completed and in-progress runs visible in the latest training log; it does not replace the earlier historical results above.
+
+### Completed: LSTM, fold 1, seed 123
+
+| Setting | Value |
+|---|---|
+| Run | `fair200_20261120_lstm_fold1_seed123` |
+| Architecture | ResNet50 image encoder + LSTM text encoder |
+| Dataset split | Fold 1; validation used for monitoring |
+| Batch size | 4 |
+| Epochs completed | 1 |
+| Training steps | 200 |
+| Validation steps | 200 |
+| Optimizer | AdamW |
+| Learning rate | 0.0001 |
+| Weight decay | 0.0001 |
+| Retrieval loss | InfoNCE |
+| Temperature | 0.07 |
+| Device | CPU (`/CPU:0`) |
+| Final training objective/loss | 2.060249 |
+| Final validation retrieval loss | **1.856892** |
+| Training time | 22.93 minutes |
+| Best checkpoint | `checkpoints/experiments/fair200_20261120_lstm_fold1_seed123/best/best_model-1` |
+| Latest checkpoint | `checkpoints/experiments/fair200_20261120_lstm_fold1_seed123/latest/latest_checkpoint-1` |
+
+The held-out test split was **not used**. This run provides validation-loss and training-time evidence only; retrieval-ranking metrics for this seed are not reported in the supplied log and remain pending.
+
+### In progress: Cross-Modal Attention, fold 1, seed 123
+
+The next run, `fair200_20261120_cross_attention_fold1_seed123`, has started (fair comparison run 6/9). It is configured for one epoch, batch size 4, 200 training steps and 200 validation steps, AdamW with learning rate 0.0001, InfoNCE temperature 0.07, and CPU execution. The model uses an LSTM text encoder with Cross-Modal Attention enabled and a matching-loss branch enabled (matching-loss weight 0.2). No completed loss, checkpoint, or retrieval metric is available yet; these must remain **Pending** until the run finishes.
+
+### Reporting notes
+
+- The Keras mask-propagation warnings for projection layers appeared during execution but did not stop the LSTM run; training completed and checkpoints were saved.
+- Do not interpret validation retrieval loss as Recall@K or as proof of retrieval quality.
+- Do not declare a winning architecture from this partial run. Complete the remaining runs and compare retrieval metrics under the same evaluation protocol.
+- The training log reports CPU execution. The exact hardware model and RAM remain to be documented.
