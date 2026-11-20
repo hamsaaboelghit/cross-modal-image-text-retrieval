@@ -74,3 +74,59 @@ No final metrics or checkpoint have been reported yet. Training/validation losse
 - Validation retrieval loss is not interchangeable with Recall@K or Mean Recall.
 - No final architecture winner can be declared from this partial run update.
 - The held-out test split remains unused.
+
+
+---
+
+## Updated status and research protocol — 20 November 2026
+
+### Explicit hypotheses
+
+These are proposed hypotheses to be tested, not conclusions:
+
+- **H1:** Recurrent text encoders will outperform the lightweight CNN/mean-pooling baseline on bidirectional retrieval when evaluated under matched conditions.
+- **H2:** GRU and LSTM will exhibit different retrieval-quality/computational-cost trade-offs.
+- **H3:** Cross-modal attention will improve retrieval only if it is compared with a recurrent control using the same loss terms and training budget.
+- **H4:** Caption count and image augmentation will affect retrieval generalization and must be tested as separate data-strategy factors.
+- **H5:** Pretrained ResNet50 will provide a more effective or efficient visual representation than scratch initialization on this dataset.
+
+### Latest run correction
+
+The latest received log confirms that seed-123 LSTM completed; it supersedes the earlier statement in this report that this run was still in progress.
+
+| Run | Status | Training objective | Validation retrieval loss | Training time |
+|---|---|---:|---:|---:|
+| GRU, seed 42 | Completed | 2.086361 | 1.898083 | 25.16 min |
+| LSTM, seed 42 | Completed | 2.089612 | 1.884016 | 22.03 min |
+| Cross-Modal Attention, seed 42 | Completed | 2.235646 | 1.903820 | 55.62 min |
+| GRU, seed 123 | Completed | 2.039485 | 1.826844 | 25.51 min |
+| LSTM, seed 123 | Completed | 2.060249 | 1.856892 | 22.93 min |
+| Cross-Modal Attention, seed 123 | In progress in latest supplied log | Pending | Pending | Pending |
+| GRU, seed 456 | Pending | Pending | Pending | Pending |
+| LSTM, seed 456 | Pending | Pending | Pending | Pending |
+| Cross-Modal Attention, seed 456 | Pending | Pending | Pending | Pending |
+
+All completed runs above used fold 1, CPU, batch size 4, one epoch, 200 training steps, and 200 validation steps. The seed-123 LSTM run used AdamW (learning rate 0.0001, weight decay 0.0001), InfoNCE temperature 0.07, five captions per image, and frozen pretrained ResNet50. Its best checkpoint is `checkpoints/experiments/fair200_20261120_lstm_fold1_seed123/best/best_model-1`. The test split was not used.
+
+**Important:** These are objective/loss and runtime values, not retrieval-ranking results. The table above cannot establish the best retrieval architecture. The Cross-Modal Attention setup uses an auxiliary matching loss with weight 0.2, unlike the GRU/LSTM runs; this confounds an attention-only comparison. The Keras sequence-mask warnings also need investigation.
+
+### Required next analyses
+
+1. Complete the pending runs and evaluate every checkpoint with the same validation retrieval evaluator.
+2. Report T2I and I2T Recall@1/5/10, Mean Recall, MRR, and Median Rank for every seed; calculate mean ± standard deviation.
+3. Add baseline and Transformer to the same controlled comparison if making claims across all implemented architecture families, or narrow the report's claim.
+4. Isolate cross-modal attention and matching loss in separate ablations.
+5. Verify the one-caption experiment whose training objective was reported as exactly zero.
+6. Complete augmentation and pretrained-vs-scratch/fine-tuning studies.
+7. Replace the error-analysis placeholders with actual query/top-five examples and documented counts.
+8. Measure parameter counts, checkpoint size, inference latency/throughput, memory, and exact hardware.
+9. Select using validation only, then evaluate the held-out test split once.
+10. Run and record the final demo using the selected checkpoint and its matching gallery.
+
+### Error-analysis protocol
+
+For both text-to-image and image-to-text, save a reproducible sample of queries, ground-truth matches, top-five results, ranks/similarity scores, and human-reviewed error labels: object confusion, action confusion, attribute mismatch, spatial-relation mismatch, multiple-object omission, and semantic mismatch. Counts and examples remain pending until actual predictions are inspected.
+
+### Reporting metrics and query groups
+
+Because this is a ranking task, ordinary per-class classification accuracy is not directly applicable. If category labels exist, report retrieval metrics by category; otherwise define reproducible query groups (e.g., people, animals, actions, attributes, spatial relations), provide group sizes, and report group-wise retrieval metrics. Do not invent categories or examples.
