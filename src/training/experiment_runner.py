@@ -51,6 +51,8 @@ def run_experiment(
     log_dir="runs",
     max_train_steps_per_epoch=None,
     max_validation_steps=None,
+    resume_from=None,
+    resume_skip_batches=0,
 ):
     """
     Run one reproducible image-text retrieval experiment.
@@ -86,6 +88,16 @@ def run_experiment(
 
     if not 0.0 <= dropout < 1.0:
         raise ValueError("dropout must be in [0, 1).")
+
+    if (
+        isinstance(resume_skip_batches, bool)
+        or not isinstance(resume_skip_batches, int)
+        or resume_skip_batches < 0
+    ):
+        raise ValueError("resume_skip_batches must be a non-negative integer.")
+
+    if resume_skip_batches and resume_from is None:
+        raise ValueError("resume_from is required when skipping prior batches.")
 
     set_seed(seed)
 
@@ -157,6 +169,12 @@ def run_experiment(
         drop_remainder=config.drop_last,
         seed=seed,
     )
+
+    # On a resumed partial epoch, rebuild the deterministic seeded dataset
+    # and skip batches already consumed by the previous process.
+    if resume_skip_batches:
+        print(f"Skipping {resume_skip_batches} previously consumed batches.")
+        train_dataset = train_dataset.skip(resume_skip_batches)
 
     val_dataset = val_data.as_dataset(
         batch_size=config.batch_size,
@@ -246,6 +264,7 @@ def run_experiment(
         checkpoint_manager=checkpoint_manager,
         logger=logger,
         early_stopping=early_stopping,
+        resume_from=resume_from,
     )
 
     elapsed_minutes = (time.time() - start_time) / 60.0
