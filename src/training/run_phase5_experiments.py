@@ -6,22 +6,24 @@ from src.training.experiment_runner import run_experiment
 from src.training.experiment_utils import ROOT, atomic_json, evaluate_full_checkpoint
 
 SEED,FOLD=42,1
-LR,BATCH,OUTPUT_DIM,DROPOUT,TEMP=1e-4,1,512,0.1,0.07
+# InfoNCE needs negatives from other images in the same batch. Batch=1
+# makes both retrieval directions degenerate and yields a misleading zero loss.
+LR,BATCH,OUTPUT_DIM,DROPOUT,TEMP=1e-4,4,512,0.1,0.07
 TRAIN_STEPS,VAL_STEPS=200,100
 EVAL_BATCH_SIZE=4
-OUT=ROOT/"results/gru_phase5_studies"
+OUT=ROOT/"results/gru_phase5_studies_batch4"
 
 def build_experiments():
     common={"encoder_type":"gru","use_cross_modal_attention":False,"caption_count":5,
         "image_augmentation":"none","negative_sampling_strategy":"random","pretrained":True,
         "unfreeze_last_block":False,"train_all_backbone":False}
     specs=[
-        ("gru_phase5_data_reference",{}),
-        ("gru_phase5_one_caption",{"caption_count":1}),
-        ("gru_phase5_light_augmentation",{"image_augmentation":"light"}),
+        ("gru_phase5_data_reference_batch4",{}),
+        ("gru_phase5_one_caption_batch4",{"caption_count":1}),
+        ("gru_phase5_light_augmentation_batch4",{"image_augmentation":"light"}),
         # Both init conditions fine-tune the same final ResNet block; BatchNorm stays frozen.
-        ("gru_phase5_resnet50_pretrained",{"unfreeze_last_block":True}),
-        ("gru_phase5_resnet50_scratch",{"pretrained":False,"unfreeze_last_block":True}),
+        ("gru_phase5_resnet50_pretrained_batch4",{"unfreeze_last_block":True}),
+        ("gru_phase5_resnet50_scratch_batch4",{"pretrained":False,"unfreeze_last_block":True}),
     ]
     return [{"name":n,**common,**v} for n,v in specs]
 
@@ -40,7 +42,9 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--list",action="store_true"); p.add_argument("--resume",action="store_true")
     a=p.parse_args(); configs=build_experiments()
-    print("PHASE 5 | GRU | train_batch=1 | eval_batch=4 | train=200 | val=100")
+    if BATCH < 2:
+        raise ValueError("Phase 5 InfoNCE experiments require batch size >= 2.")
+    print(f"PHASE 5 | GRU | train_batch={BATCH} | eval_batch={EVAL_BATCH_SIZE} | train={TRAIN_STEPS} | val={VAL_STEPS}")
     for c in configs: print(c["name"],{k:c[k] for k in ("caption_count","image_augmentation","pretrained","unfreeze_last_block")})
     if a.list: print("List-only: no training started."); return
     OUT.mkdir(parents=True,exist_ok=True)

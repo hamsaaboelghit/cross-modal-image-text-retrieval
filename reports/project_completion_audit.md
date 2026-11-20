@@ -167,3 +167,15 @@ The application will report degraded readiness or return 503 until the configure
 ## 10. Conclusion
 
 The software foundation is largely in place. The most important remaining work is to establish trustworthy model results and verify the local inference artifacts. Do not describe the project as experimentally complete until the controlled training, multi-seed validation, final test evaluation, and real end-to-end demo are complete.
+
+## Finalization branch — code-level corrections prepared
+
+Branch: `finalization/fix-retrieval-training`.
+
+The source review identified a concrete cause for the Phase 5 one-caption anomaly: Phase 5 used training batch size 1 with in-batch InfoNCE. A one-image batch has no negative images, so its contrastive objective is degenerate and the logged zero is not evidence of successful learning. The Phase 5 runner is changed on this branch to use batch size 4 and a separate output/checkpoint namespace (`*_batch4`) so the invalid pilot checkpoints are not silently reused. A regression test now requires batch size 1 to fail clearly and a batch of four to produce finite, nonzero loss and gradients.
+
+The projection head now explicitly declares mask handling and returns no sequence mask for pooled rank-2 embeddings; sequence masks are retained only for rank-3 features. This addresses the Keras warning at the projection boundary, but the complete training and inference path still needs to be executed locally to confirm that all warnings and padding-related behavior are resolved.
+
+**Not yet verified:** this branch has not been run on the user's Windows environment. Before merging, run the targeted unit tests, the full test suite, and the new Phase 5 batch-4 pilot. Re-evaluate the resulting checkpoint with the exact same architecture configuration, rebuild the gallery from that checkpoint and vocabulary, then smoke-test both API retrieval directions. If retrieval metrics remain weak, report that honestly; these changes prevent a degenerate training setup but do not guarantee high retrieval quality.
+
+The previous Phase 5 batch-1 results remain historical pilot results and must not be relabeled as corrected experiments. The test split remains unused.
