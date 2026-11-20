@@ -8,19 +8,19 @@ from src.training.experiment_utils import ROOT, atomic_json, evaluate_full_check
 SEED,FOLD=42,1
 LR,BATCH,OUTPUT_DIM,DROPOUT,TEMP=1e-4,1,512,0.1,0.07
 TRAIN_STEPS,VAL_STEPS=200,100
-OUT=ROOT/"results/phase5_data_strategy"
+OUT=ROOT/"results/gru_phase5_studies"
 
 def build_experiments():
     common={"encoder_type":"gru","use_cross_modal_attention":False,"caption_count":5,
         "image_augmentation":"none","negative_sampling_strategy":"random","pretrained":True,
         "unfreeze_last_block":False,"train_all_backbone":False}
     specs=[
-        ("data_reference",{}),
-        ("one_caption",{"caption_count":1}),
-        ("light_augmentation",{"image_augmentation":"light"}),
+        ("gru_phase5_data_reference",{}),
+        ("gru_phase5_one_caption",{"caption_count":1}),
+        ("gru_phase5_light_augmentation",{"image_augmentation":"light"}),
         # Both init conditions fine-tune the same final ResNet block; BatchNorm stays frozen.
-        ("resnet50_pretrained",{"unfreeze_last_block":True}),
-        ("resnet50_scratch",{"pretrained":False,"unfreeze_last_block":True}),
+        ("gru_phase5_resnet50_pretrained",{"unfreeze_last_block":True}),
+        ("gru_phase5_resnet50_scratch",{"pretrained":False,"unfreeze_last_block":True}),
     ]
     return [{"name":n,**common,**v} for n,v in specs]
 
