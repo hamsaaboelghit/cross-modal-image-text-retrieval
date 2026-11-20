@@ -42,3 +42,35 @@
 4. Repeat selected final configurations with at least three seeds.
 5. Use the test split for final evaluation only.
 
+
+
+
+## Latest fair-comparison progress — 20 November 2026
+
+The earlier table above contains historical architecture retrieval metrics from runs with different training histories; it must not be treated as the final controlled comparison.
+
+### Newly completed run: LSTM, fold 1, seed 123
+
+- Run: `fair200_20261120_lstm_fold1_seed123`
+- Configuration: batch size 4, one epoch, 200 training steps, 200 validation steps, AdamW, learning rate 0.0001, weight decay 0.0001, InfoNCE temperature 0.07, pretrained frozen ResNet50, five captions per image.
+- Device: CPU.
+- Training objective/retrieval loss: **2.060249**.
+- Validation retrieval loss: **1.856892**.
+- Training time: **22.93 minutes**.
+- Best checkpoint: `checkpoints/experiments/fair200_20261120_lstm_fold1_seed123/best/best_model-1`.
+- Test split: not used.
+
+This log does not include Recall@K, Mean Recall, MRR, or Median Rank. Therefore, this run cannot yet be added to the retrieval-results table above.
+
+### In-progress run: Cross-Modal Attention, fold 1, seed 123
+
+Run `fair200_20261120_cross_attention_fold1_seed123` (run 6/9) has started. It uses an LSTM text encoder, Cross-Modal Attention, and a matching branch with matching-loss weight 0.2. The run is configured for one epoch, batch size 4, 200 training steps and 200 validation steps, AdamW, learning rate 0.0001, InfoNCE temperature 0.07, and CPU execution.
+
+No final metrics or checkpoint have been reported yet. Training/validation losses and retrieval-ranking metrics remain **Pending** until completion.
+
+### Notes
+
+- The Keras mask warnings did not prevent the LSTM run from completing, but they should be investigated before final reporting.
+- Validation retrieval loss is not interchangeable with Recall@K or Mean Recall.
+- No final architecture winner can be declared from this partial run update.
+- The held-out test split remains unused.
