@@ -1229,3 +1229,20 @@ The latest received log supersedes the earlier progress note that described the 
 - [ ] Measure parameters, model size, latency, throughput, memory, and hardware.
 - [ ] Select the model using validation only, then run the held-out test evaluation once.
 - [ ] Run an end-to-end demo test with the selected checkpoint and matching gallery.
+
+
+## GRU Phase 5 validation-checkpoint evaluation — 20 November 2026
+
+A validation evaluation was launched for the Phase 5 pretrained-ResNet50 GRU checkpoint using:
+
+```bash
+python -m src.evaluation.evaluate_checkpoint --checkpoint checkpoints/experiments/gru_phase5_resnet50_pretrained/best --model-type full --encoder-type gru --pretrained --output results/evaluation_gru_resnet50.json
+```
+
+The evaluator resolved the checkpoint to `best_model-1` and successfully restored the model weights. The recorded checkpoint metadata reports epoch 0 (zero-based), checkpoint validation loss **0.8051351488**, fold 1, seed 42. The run configuration recorded one epoch, batch size 1, learning rate 0.0001, AdamW with weight decay 0.0001, InfoNCE temperature 0.07, matching-loss weight 0.2, 200 maximum training steps, and 100 maximum validation steps. The run used pretrained ResNet50 and did not report use of the held-out test split.
+
+The supplied console log showed validation embedding extraction progressing to **4,800 images**. The log ends before evaluation completion and does not show final retrieval metrics or confirmation that the JSON output was fully written. Therefore, this is an **in-progress evaluation record**, not a completed result. Text-to-Image and Image-to-Text Recall@1/5/10, Mean Recall, MRR, Median Rank, and final evaluated query/gallery counts remain **Pending** until the process finishes and the output file is checked.
+
+Keras emitted warnings that projection layers do not preserve the attached sequence mask. These warnings did not prevent checkpoint restoration or the embedding-extraction batches shown in the supplied log, but padding-mask propagation should be investigated. TensorFlow oneDNN/CPU feature messages are environment/runtime notices and are not, by themselves, evidence of evaluation failure.
+
+Do not confuse the checkpoint's stored validation loss (0.8051351488) with retrieval-ranking performance. Do not claim that the GRU checkpoint is accurate or superior based on this loss. After the process finishes, verify `results/evaluation_gru_resnet50.json`, record the actual metrics and evaluated split, and keep the held-out test split untouched until final model selection.
